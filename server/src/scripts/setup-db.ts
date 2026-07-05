@@ -15,16 +15,30 @@ const avatars = {
   diego: "https://api.dicebear.com/9.x/initials/svg?seed=Diego%20Rocha"
 };
 
-async function upsertUser(name: string, email: string, role: string, passwordHash: string, avatarUrl: string) {
+const rolePermissions: Record<string, string[]> = {
+  admin: ["dashboard", "students", "finance", "attendance", "techniques", "ranking", "store", "competitions", "users", "registrations"],
+  teacher: ["dashboard", "students", "attendance", "techniques", "ranking", "store", "competitions", "registrations"],
+  finance: ["dashboard", "finance"],
+  student: ["dashboard", "finance", "techniques", "ranking", "store", "competitions"]
+};
+
+async function upsertUser(name: string, email: string, role: string, passwordHash: string, avatarUrl: string, username = "", phone = "") {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO users (name, email, password_hash, role, avatar_url)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO users (name, username, email, phone, password_hash, role, avatar_url)
+     VALUES ($1, NULLIF($2, ''), $3, NULLIF($4, ''), $5, $6, $7)
      ON CONFLICT (email)
-     DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, avatar_url = EXCLUDED.avatar_url
+     DO UPDATE SET name = EXCLUDED.name, username = EXCLUDED.username, phone = EXCLUDED.phone, role = EXCLUDED.role, avatar_url = EXCLUDED.avatar_url
      RETURNING id`,
-    [name, email, passwordHash, role, avatarUrl]
+    [name, username, email, phone, passwordHash, role, avatarUrl]
   );
   return result.rows[0].id;
+}
+
+async function grantDefaultPermissions(userId: string, role: string) {
+  await pool.query("DELETE FROM user_permissions WHERE user_id = $1", [userId]);
+  for (const permission of rolePermissions[role] ?? []) {
+    await pool.query("INSERT INTO user_permissions (user_id, permission_key) VALUES ($1, $2) ON CONFLICT DO NOTHING", [userId, permission]);
+  }
 }
 
 async function main() {
@@ -32,7 +46,8 @@ async function main() {
   await pool.query(schema);
 
   const passwordHash = await bcrypt.hash("123456", 10);
-  const adminId = await upsertUser("William Lago", "admin@filhosdorei.com", "admin", passwordHash, avatars.admin);
+  const adminPasswordHash = await bcrypt.hash("Admin@2026", 10);
+  const adminId = await upsertUser("Admin", "admin@filhosdorei.local", "admin", adminPasswordHash, avatars.admin, "Admin");
   const teacherId = await upsertUser(
     "Professor William",
     "professor@filhosdorei.com",
@@ -44,6 +59,12 @@ async function main() {
   const brunoUserId = await upsertUser("Bruno Lima", "bruno@aluno.com", "student", passwordHash, avatars.bruno);
   const carlaUserId = await upsertUser("Carla Mendes", "carla@aluno.com", "student", passwordHash, avatars.carla);
   const diegoUserId = await upsertUser("Diego Rocha", "diego@aluno.com", "student", passwordHash, avatars.diego);
+
+  await grantDefaultPermissions(adminId, "admin");
+  await grantDefaultPermissions(teacherId, "teacher");
+  for (const userId of [anaUserId, brunoUserId, carlaUserId, diegoUserId]) {
+    await grantDefaultPermissions(userId, "student");
+  }
 
   const teacher = await pool.query<{ id: string }>(
     `INSERT INTO teachers (user_id, name, belt, phone)
@@ -275,7 +296,7 @@ async function main() {
   );
 
   console.log("Banco configurado com schema e dados demo.");
-  console.log("Logins demo: admin@filhosdorei.com / 123456 | ana@aluno.com / 123456");
+  console.log("Logins demo: Admin / Admin@2026 | ana@aluno.com / 123456");
 }
 
 main()

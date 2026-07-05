@@ -35,6 +35,33 @@ const levelFromXp = (xp: number) => Math.min(100, Math.max(1, Math.floor(xp / 50
 const brl = (value: unknown) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value ?? 0));
 const brDate = (value: unknown) => new Intl.DateTimeFormat("pt-BR").format(new Date(String(value)));
+const permissionKeys = [
+  "dashboard",
+  "students",
+  "finance",
+  "attendance",
+  "techniques",
+  "ranking",
+  "store",
+  "competitions",
+  "users",
+  "registrations"
+] as const;
+const defaultRolePermissions: Record<string, string[]> = {
+  admin: [...permissionKeys],
+  teacher: ["dashboard", "students", "attendance", "techniques", "ranking", "store", "competitions", "registrations"],
+  finance: ["dashboard", "finance"],
+  student: ["dashboard", "finance", "techniques", "ranking", "store", "competitions"]
+};
+const passwordSchema = z
+  .string()
+  .min(6, "Senha precisa ter no mínimo 6 caracteres.")
+  .max(8, "Senha precisa ter no máximo 8 caracteres.")
+  .regex(/[^A-Za-z0-9]/, "Senha precisa ter pelo menos um caractere especial.");
+const phoneSchema = z
+  .string()
+  .transform((value) => value.replace(/\D/g, ""))
+  .refine((value) => value.length === 10 || value.length === 11, "Telefone precisa ter DDD e 10 ou 11 dígitos.");
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: "Filhos do Rei BJJ API" });
@@ -42,7 +69,7 @@ app.get("/api/health", (_req, res) => {
 
 app.post("/api/auth/login", async (req, res) => {
   const parsed = z
-    .object({ email: z.string().email(), password: z.string().min(1) })
+    .object({ email: z.string().min(1), password: z.string().min(1) })
     .safeParse(req.body);
 
   if (!parsed.success) {
@@ -52,12 +79,15 @@ app.post("/api/auth/login", async (req, res) => {
   const userResult = await query<{
     id: string;
     name: string;
+    username: string | null;
     email: string;
     password_hash: string;
     role: "admin" | "teacher" | "student" | "finance";
     avatar_url: string | null;
   }>(
-    "SELECT id, name, email, password_hash, role, avatar_url FROM users WHERE email = $1",
+    `SELECT id, name, username, email, password_hash, role, avatar_url
+     FROM users
+     WHERE lower(email) = $1 OR lower(COALESCE(username, '')) = $1`,
     [parsed.data.email.toLowerCase()]
   );
 
@@ -66,7 +96,8 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(401).json({ message: "Credenciais inválidas." });
   }
 
-  const tokenUser = { id: user.id, name: user.name, email: user.email, role: user.role };
+  const permissions = await getUserPermissions(user.id, user.role);
+  const tokenUser = { id: user.id, name: user.name, username: user.username, email: user.email, role: user.role, permissions };
   const student =
     user.role === "student"
       ? (
@@ -92,6 +123,285 @@ app.get("/api/me", requireAuth, async (req, res) => {
       : null;
 
   res.json({ user: req.user, student });
+});
+
+app.post("/api/auth/register", async (req, res) => {
+  const parsed = z
+    .object({
+      fullName: z.string().min(3),
+      email: z.string().email(),
+      phone: phoneSchema,
+      password: passwordSchema
+    })
+    .safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? "Dados inválidos." });
+  }
+
+  const email = parsed.data.email.toLowerCase();
+  const existing = await query<{ id: string }>(
+    `SELECT id FROM users WHERE lower(email) = $1
+     UNION
+     SELECT id FROM registration_requests WHERE lower(email) = $1 AND status = 'pending'`,
+    [email]
+  );
+
+  if (existing.rows[0]) {
+    return res.status(409).json({ message: "Já existe cadastro ou solicitação pendente para este e-mail." });
+  }
+
+  const passwordHash = await bcrypt.hash(parsed.data.password, 10);
+  const result = await query(
+    `INSERT INTO registration_requests (full_name, email, phone, password_hash)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, full_name, email, phone, status, requested_at`,
+    [parsed.data.fullName, email, parsed.data.phone, passwordHash]
+  );
+
+  res.status(201).json(result.rows[0]);
+});
+
+app.post("/api/auth/password-reset", async (req, res) => {
+  const parsed = z
+    .object({
+      email: z.string().email().optional().or(z.literal("")),
+      phone: phoneSchema.optional().or(z.literal(""))
+    })
+    .safeParse(req.body);
+
+  if (!parsed.success || (!parsed.data.email && !parsed.data.phone)) {
+    return res.status(400).json({ message: "Informe e-mail ou telefone válido." });
+  }
+
+  const email = parsed.data.email ? parsed.data.email.toLowerCase() : null;
+  const user = await query<{ id: string }>(
+    `SELECT id FROM users
+     WHERE ($1::text IS NOT NULL AND lower(email) = $1)
+        OR ($2::text IS NOT NULL AND phone = $2)
+     LIMIT 1`,
+    [email, parsed.data.phone || null]
+  );
+
+  const result = await query(
+    `INSERT INTO password_reset_requests (user_id, email, phone)
+     VALUES ($1, $2, $3)
+     RETURNING id, status, requested_at`,
+    [user.rows[0]?.id ?? null, email, parsed.data.phone || null]
+  );
+
+  res.status(201).json(result.rows[0]);
+});
+
+app.get("/api/admin/registration-requests", requireAuth, requireRole(["admin"]), async (_req, res) => {
+  const result = await query(
+    `SELECT id, full_name, email, phone, status, requested_at, reviewed_at, note
+     FROM registration_requests
+     ORDER BY requested_at DESC`
+  );
+  res.json(result.rows);
+});
+
+app.patch("/api/admin/registration-requests/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+  const parsed = z.object({ status: z.enum(["approved", "rejected"]), note: z.string().optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const requestResult = await client.query<{
+      id: string;
+      full_name: string;
+      email: string;
+      phone: string;
+      password_hash: string;
+      status: string;
+    }>("SELECT * FROM registration_requests WHERE id = $1 FOR UPDATE", [req.params.id]);
+    const requestRow = requestResult.rows[0];
+
+    if (!requestRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Solicitação não encontrada." });
+    }
+
+    if (requestRow.status !== "pending") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: "Solicitação já revisada." });
+    }
+
+    if (parsed.data.status === "approved") {
+      const user = await client.query<{ id: string }>(
+        `INSERT INTO users (name, email, phone, password_hash, role, avatar_url)
+         VALUES ($1, $2, $3, $4, 'student', $5)
+         RETURNING id`,
+        [
+          requestRow.full_name,
+          requestRow.email,
+          requestRow.phone,
+          requestRow.password_hash,
+          `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(requestRow.full_name)}`
+        ]
+      );
+
+      await client.query(
+        `INSERT INTO students (user_id, full_name, email, phone, belt, stripe_count, classes_until_next_stripe, goals, photo_url)
+         VALUES ($1, $2, $3, $4, 'Branca', 0, 12, 'Cadastro aprovado. Definir objetivos com o professor.', $5)`,
+        [
+          user.rows[0].id,
+          requestRow.full_name,
+          requestRow.email,
+          requestRow.phone,
+          `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(requestRow.full_name)}`
+        ]
+      );
+
+      for (const permission of defaultRolePermissions.student) {
+        await client.query("INSERT INTO user_permissions (user_id, permission_key) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
+          user.rows[0].id,
+          permission
+        ]);
+      }
+    }
+
+    const updated = await client.query(
+      `UPDATE registration_requests
+       SET status = $1, reviewed_at = now(), reviewed_by = $2, note = $3
+       WHERE id = $4
+       RETURNING id, full_name, email, phone, status, reviewed_at, note`,
+      [parsed.data.status, req.user?.id, parsed.data.note ?? "", req.params.id]
+    );
+
+    await client.query("COMMIT");
+    res.json(updated.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/admin/password-reset-requests", requireAuth, requireRole(["admin"]), async (_req, res) => {
+  const result = await query(
+    `SELECT pr.id, pr.email, pr.phone, pr.status, pr.requested_at, pr.reviewed_at, pr.note,
+      u.id AS user_id, u.name AS user_name
+     FROM password_reset_requests pr
+     LEFT JOIN users u ON u.id = pr.user_id
+     ORDER BY pr.requested_at DESC`
+  );
+  res.json(result.rows);
+});
+
+app.patch("/api/admin/password-reset-requests/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+  const parsed = z
+    .object({ status: z.enum(["resolved", "rejected"]), newPassword: passwordSchema.optional(), note: z.string().optional() })
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0]?.message ?? "Dados inválidos." });
+  if (parsed.data.status === "resolved" && !parsed.data.newPassword) {
+    return res.status(400).json({ message: "Informe a nova senha." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const reset = await client.query<{ id: string; user_id: string | null; status: string }>(
+      "SELECT id, user_id, status FROM password_reset_requests WHERE id = $1 FOR UPDATE",
+      [req.params.id]
+    );
+    const row = reset.rows[0];
+
+    if (!row) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Solicitação não encontrada." });
+    }
+
+    if (parsed.data.status === "resolved") {
+      if (!row.user_id) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ message: "Usuário não encontrado para esta solicitação." });
+      }
+      await client.query("UPDATE users SET password_hash = $1 WHERE id = $2", [await bcrypt.hash(parsed.data.newPassword!, 10), row.user_id]);
+    }
+
+    const updated = await client.query(
+      `UPDATE password_reset_requests
+       SET status = $1, reviewed_at = now(), reviewed_by = $2, note = $3
+       WHERE id = $4
+       RETURNING *`,
+      [parsed.data.status, req.user?.id, parsed.data.note ?? "", req.params.id]
+    );
+
+    await client.query("COMMIT");
+    res.json(updated.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/admin/users", requireAuth, requireRole(["admin"]), async (_req, res) => {
+  const result = await query(
+    `SELECT u.id, u.name, u.username, u.email, u.phone, u.role::text, u.created_at,
+      COALESCE(array_agg(up.permission_key) FILTER (WHERE up.permission_key IS NOT NULL), '{}') AS permissions
+     FROM users u
+     LEFT JOIN user_permissions up ON up.user_id = u.id
+     GROUP BY u.id
+     ORDER BY u.created_at DESC`
+  );
+  res.json(result.rows);
+});
+
+app.patch("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+  const parsed = z
+    .object({
+      name: z.string().min(2),
+      username: z.string().min(2).optional().or(z.literal("")),
+      email: z.string().email(),
+      phone: phoneSchema.optional().or(z.literal("")),
+      role: z.enum(["admin", "teacher", "student", "finance"]),
+      permissions: z.array(z.string()).default([])
+    })
+    .safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? "Dados inválidos." });
+  }
+
+  const safePermissions = parsed.data.permissions.filter((permission) => permissionKeys.includes(permission as (typeof permissionKeys)[number]));
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const updated = await client.query(
+      `UPDATE users
+       SET name = $1, username = NULLIF($2, ''), email = $3, phone = NULLIF($4, ''), role = $5
+       WHERE id = $6
+       RETURNING id, name, username, email, phone, role::text`,
+      [parsed.data.name, parsed.data.username ?? "", parsed.data.email.toLowerCase(), parsed.data.phone ?? "", parsed.data.role, req.params.id]
+    );
+
+    if (!updated.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Usuário não encontrado." });
+    }
+
+    await client.query("DELETE FROM user_permissions WHERE user_id = $1", [req.params.id]);
+    for (const permission of safePermissions) {
+      await client.query("INSERT INTO user_permissions (user_id, permission_key) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
+        req.params.id,
+        permission
+      ]);
+    }
+
+    await client.query("COMMIT");
+    res.json({ ...updated.rows[0], permissions: safePermissions });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 });
 
 app.get(
@@ -1279,6 +1589,17 @@ async function resolveStudentId(userId?: string, fallback?: unknown) {
   if (!userId) return null;
   const result = await query<{ id: string }>("SELECT id FROM students WHERE user_id = $1", [userId]);
   return result.rows[0]?.id ?? null;
+}
+
+async function getUserPermissions(userId: string, role: string) {
+  const result = await query<{ permission_key: string }>("SELECT permission_key FROM user_permissions WHERE user_id = $1", [userId]);
+  if (result.rows.length) return result.rows.map((row) => row.permission_key);
+
+  const defaults = defaultRolePermissions[role] ?? [];
+  for (const permission of defaults) {
+    await query("INSERT INTO user_permissions (user_id, permission_key) VALUES ($1, $2) ON CONFLICT DO NOTHING", [userId, permission]);
+  }
+  return defaults;
 }
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

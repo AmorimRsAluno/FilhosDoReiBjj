@@ -25,6 +25,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   type AdminDashboard,
+  type AdminUser,
   type CheckinRequest,
   type ClassItem,
   type Competition,
@@ -33,6 +34,8 @@ import {
   type Payment,
   type Product,
   type RankingItem,
+  type RegistrationRequest,
+  type PasswordResetRequest,
   type Session,
   type Student,
   type StudentDashboard,
@@ -57,6 +60,18 @@ const emptyStudentForm = {
   goals: "",
   status: "active"
 };
+const permissionOptions = [
+  ["dashboard", "Dashboard"],
+  ["students", "Alunos"],
+  ["finance", "Financeiro"],
+  ["attendance", "Presença"],
+  ["techniques", "Técnicas"],
+  ["ranking", "Ranking"],
+  ["store", "Loja"],
+  ["competitions", "Competições"],
+  ["users", "Usuários"],
+  ["registrations", "Solicitações"]
+] as const;
 
 const adminNav = [
   { key: "dashboard", label: "Dashboard", icon: Home },
@@ -66,7 +81,8 @@ const adminNav = [
   { key: "techniques", label: "Técnicas", icon: BookOpen },
   { key: "ranking", label: "Ranking", icon: Trophy },
   { key: "store", label: "Loja", icon: ShoppingBag },
-  { key: "competitions", label: "Competições", icon: Medal }
+  { key: "competitions", label: "Competições", icon: Medal },
+  { key: "users", label: "Usuários", icon: Shield }
 ] as const;
 
 const studentNav = [
@@ -108,14 +124,19 @@ export default function App() {
 }
 
 function Login({ onLogin }: { onLogin: (session: Session) => void }) {
+  const [mode, setMode] = useState<"login" | "register" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setError("");
+    setMessage("");
     setLoading(true);
     try {
       const session = await request<Session>("/auth/login", undefined, {
@@ -125,6 +146,47 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
       onLogin(session);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível entrar.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitRegister(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    setLoading(true);
+    try {
+      await request("/auth/register", undefined, {
+        method: "POST",
+        body: JSON.stringify({ fullName, email, phone, password })
+      });
+      setMessage("Cadastro enviado. Aguarde aprovação do administrador.");
+      setFullName("");
+      setPhone("");
+      setPassword("");
+      setMode("login");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível enviar o cadastro.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitReset(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    setLoading(true);
+    try {
+      await request("/auth/password-reset", undefined, {
+        method: "POST",
+        body: JSON.stringify({ email, phone })
+      });
+      setMessage("Solicitação enviada ao administrador.");
+      setMode("login");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível solicitar recuperação.");
     } finally {
       setLoading(false);
     }
@@ -144,16 +206,16 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
           <h1 className="mt-6 text-xl font-black tracking-wide text-white">FILHOS DO REI BJJ</h1>
           <p className="mt-1 text-sm font-bold tracking-[0.14em] text-royal-gold">WILLIAM LAGO</p>
         </div>
+        {mode === "login" && (
         <form className="space-y-4" onSubmit={submit}>
           <label className="block text-sm font-semibold text-zinc-200">
-            E-mail
+            Usuário ou e-mail
             <Input
               className="mt-2"
-              type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="Digite seu e-mail"
-              autoComplete="email"
+              placeholder="Digite Admin ou seu e-mail"
+              autoComplete="username"
               required
             />
           </label>
@@ -169,14 +231,46 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
               required
             />
           </label>
+          {message && <p className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-3 text-sm text-emerald-200">{message}</p>}
           {error && <p className="rounded-lg border border-royal-red/40 bg-royal-red/10 p-3 text-sm text-red-200">{error}</p>}
           <Button className="w-full" disabled={loading}>
             {loading ? "Entrando..." : "Entrar"}
           </Button>
         </form>
-        <button className="mt-4 w-full text-center text-sm font-semibold text-royal-gold hover:text-yellow-200">
-          Recuperar senha
-        </button>
+        )}
+        {mode === "register" && (
+          <form className="space-y-4" onSubmit={submitRegister}>
+            <Input placeholder="Nome completo" value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+            <Input type="email" placeholder="E-mail" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            <Input placeholder="Telefone com DDD" value={phone} onChange={(event) => setPhone(event.target.value)} required />
+            <Input
+              type="password"
+              placeholder="Senha: 6 a 8 caracteres com especial"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+            {error && <p className="rounded-lg border border-royal-red/40 bg-royal-red/10 p-3 text-sm text-red-200">{error}</p>}
+            <Button className="w-full" disabled={loading}>
+              {loading ? "Enviando..." : "Enviar cadastro"}
+            </Button>
+          </form>
+        )}
+        {mode === "reset" && (
+          <form className="space-y-4" onSubmit={submitReset}>
+            <Input type="email" placeholder="E-mail cadastrado" value={email} onChange={(event) => setEmail(event.target.value)} />
+            <Input placeholder="Telefone com DDD" value={phone} onChange={(event) => setPhone(event.target.value)} />
+            {error && <p className="rounded-lg border border-royal-red/40 bg-royal-red/10 p-3 text-sm text-red-200">{error}</p>}
+            <Button className="w-full" disabled={loading}>
+              {loading ? "Enviando..." : "Solicitar nova senha"}
+            </Button>
+          </form>
+        )}
+        <div className="mt-4 grid gap-2 text-center text-sm font-semibold text-royal-gold">
+          {mode !== "login" && <button onClick={() => setMode("login")}>Voltar ao login</button>}
+          {mode !== "register" && <button onClick={() => setMode("register")}>Cadastrar aluno</button>}
+          {mode !== "reset" && <button onClick={() => setMode("reset")}>Recuperar senha</button>}
+        </div>
       </Card>
     </main>
   );
@@ -184,11 +278,17 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
 
 function AdminApp({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState<AdminTab>("dashboard");
+  const allowed = session.user.permissions ?? [];
+  const visibleNav = adminNav.filter((item) => session.user.role === "admin" || allowed.includes(item.key));
+
+  useEffect(() => {
+    if (!visibleNav.some((item) => item.key === tab)) setTab((visibleNav[0]?.key ?? "dashboard") as AdminTab);
+  }, [tab, visibleNav]);
 
   return (
     <Shell
       session={session}
-      nav={adminNav}
+      nav={visibleNav}
       activeTab={tab}
       onChange={(key) => setTab(key as AdminTab)}
       onLogout={onLogout}
@@ -201,6 +301,7 @@ function AdminApp({ session, onLogout }: { session: Session; onLogout: () => voi
       {tab === "ranking" && <RankingPanel token={session.token} />}
       {tab === "store" && <StorePanel token={session.token} isAdmin />}
       {tab === "competitions" && <CompetitionsPanel token={session.token} isAdmin />}
+      {tab === "users" && <UsersPanel token={session.token} />}
     </Shell>
   );
 }
@@ -223,6 +324,159 @@ function StudentApp({ session, onLogout }: { session: Session; onLogout: () => v
       {tab === "store" && <StorePanel token={session.token} />}
       {tab === "competitions" && <CompetitionsPanel token={session.token} studentId={session.student?.id} />}
     </Shell>
+  );
+}
+
+function UsersPanel({ token }: { token: string }) {
+  const users = useApi<AdminUser[]>("/admin/users", token);
+  const registrations = useApi<RegistrationRequest[]>("/admin/registration-requests", token);
+  const resets = useApi<PasswordResetRequest[]>("/admin/password-reset-requests", token);
+  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
+  const [message, setMessage] = useState("");
+
+  async function reviewRegistration(id: string, status: "approved" | "rejected") {
+    await request(`/admin/registration-requests/${id}`, token, {
+      method: "PATCH",
+      body: JSON.stringify({ status })
+    });
+    setMessage(status === "approved" ? "Cadastro aprovado." : "Cadastro recusado.");
+    registrations.reload();
+    users.reload();
+  }
+
+  async function reviewReset(id: string, status: "resolved" | "rejected") {
+    await request(`/admin/password-reset-requests/${id}`, token, {
+      method: "PATCH",
+      body: JSON.stringify({ status, newPassword: resetPasswords[id] })
+    });
+    setMessage(status === "resolved" ? "Senha redefinida." : "Solicitação recusada.");
+    resets.reload();
+  }
+
+  return (
+    <div className="space-y-5">
+      <PageTitle title="Usuários e permissões" subtitle="Aprovação de cadastro, recuperação de senha e controle de acesso" />
+      {message && <Card className="border-royal-gold/40 text-sm text-royal-gold">{message}</Card>}
+
+      <Card>
+        <h3 className="text-lg font-bold text-white">Cadastros pendentes</h3>
+        <div className="mt-4 grid gap-3">
+          {registrations.data?.filter((item) => item.status === "pending").map((item) => (
+            <div key={item.id} className="rounded-lg border border-royal-line bg-black/20 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-bold text-white">{item.full_name}</p>
+                  <p className="mt-1 text-sm text-royal-muted">{item.email} · {item.phone}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={() => reviewRegistration(item.id, "approved")}>Aprovar</Button>
+                  <Button variant="danger" onClick={() => reviewRegistration(item.id, "rejected")}>Recusar</Button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {!registrations.data?.some((item) => item.status === "pending") && <EmptyState>Nenhum cadastro pendente.</EmptyState>}
+        </div>
+      </Card>
+
+      <Card>
+        <h3 className="text-lg font-bold text-white">Recuperação de senha</h3>
+        <div className="mt-4 grid gap-3">
+          {resets.data?.filter((item) => item.status === "pending").map((item) => (
+            <div key={item.id} className="rounded-lg border border-royal-line bg-black/20 p-3">
+              <p className="font-bold text-white">{item.user_name ?? "Usuário não localizado"}</p>
+              <p className="mt-1 text-sm text-royal-muted">{item.email ?? "Sem e-mail"} · {item.phone ?? "Sem telefone"}</p>
+              <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
+                <Input
+                  type="password"
+                  placeholder="Nova senha: 6 a 8 com especial"
+                  value={resetPasswords[item.id] ?? ""}
+                  onChange={(event) => setResetPasswords({ ...resetPasswords, [item.id]: event.target.value })}
+                />
+                <Button onClick={() => reviewReset(item.id, "resolved")}>Redefinir</Button>
+                <Button variant="danger" onClick={() => reviewReset(item.id, "rejected")}>Recusar</Button>
+              </div>
+            </div>
+          ))}
+          {!resets.data?.some((item) => item.status === "pending") && <EmptyState>Nenhuma solicitação de senha pendente.</EmptyState>}
+        </div>
+      </Card>
+
+      <div className="grid gap-3">
+        {users.data?.map((user) => (
+          <UserPermissionCard key={user.id} token={token} user={user} onSaved={users.reload} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UserPermissionCard({ token, user, onSaved }: { token: string; user: AdminUser; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    name: user.name,
+    username: user.username ?? "",
+    email: user.email,
+    phone: user.phone ?? "",
+    role: user.role,
+    permissions: user.permissions ?? []
+  });
+  const [saving, setSaving] = useState(false);
+
+  function togglePermission(permission: string) {
+    const permissions = form.permissions.includes(permission)
+      ? form.permissions.filter((item) => item !== permission)
+      : [...form.permissions, permission];
+    setForm({ ...form, permissions });
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await request(`/admin/users/${user.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify(form)
+      });
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
+        <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+        <Input placeholder="Usuário" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} />
+        <Input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
+        <Select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as AdminUser["role"] })}>
+          <option value="admin">Admin</option>
+          <option value="teacher">Professor</option>
+          <option value="finance">Financeiro</option>
+          <option value="student">Aluno</option>
+        </Select>
+      </div>
+      <Input className="mt-3" placeholder="Telefone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
+      <div className="mt-4 flex flex-wrap gap-2">
+        {permissionOptions.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => togglePermission(key)}
+            className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+              form.permissions.includes(key) ? "border-royal-gold bg-royal-gold text-black" : "border-royal-line bg-white/5 text-zinc-300"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <Badge tone="gold">{roleLabel(form.role)}</Badge>
+        <Button disabled={saving} onClick={save}>
+          <Save size={16} /> {saving ? "Salvando..." : "Salvar permissões"}
+        </Button>
+      </div>
+    </Card>
   );
 }
 

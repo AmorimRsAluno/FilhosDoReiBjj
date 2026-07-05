@@ -41,7 +41,7 @@ ABRIR_DEMO_CLIENTE.bat
 
 ## Logins demo
 
-- Admin: `admin@filhosdorei.com` / `123456`
+- Admin: `Admin` / `Admin@2026`
 - Professor: `professor@filhosdorei.com` / `123456`
 - Aluno: `ana@aluno.com` / `123456`
 

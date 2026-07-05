@@ -21,11 +21,55 @@ END $$;
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
+  username TEXT UNIQUE,
   email TEXT NOT NULL UNIQUE,
+  phone TEXT,
   password_hash TEXT NOT NULL,
   role user_role NOT NULL DEFAULT 'student',
   avatar_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role user_role NOT NULL DEFAULT 'student';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users(email);
+CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique_idx ON users(username);
+
+CREATE TABLE IF NOT EXISTS user_permissions (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  permission_key TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, permission_key)
+);
+
+CREATE TABLE IF NOT EXISTS registration_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  note TEXT
+);
+
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  email TEXT,
+  phone TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'resolved', 'rejected')),
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  note TEXT
 );
 
 CREATE TABLE IF NOT EXISTS teachers (

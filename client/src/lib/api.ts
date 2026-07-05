@@ -5,14 +5,45 @@ export type Role = "admin" | "teacher" | "student" | "finance";
 export type User = {
   id: string;
   name: string;
+  username?: string | null;
   email: string;
   role: Role;
+  phone?: string | null;
+  permissions?: string[];
 };
 
 export type Session = {
   token: string;
   user: User;
   student?: StudentSummary | null;
+};
+
+export type AdminUser = User & {
+  created_at: string;
+  permissions: string[];
+};
+
+export type RegistrationRequest = {
+  id: string;
+  full_name: string;
+  email: string;
+  phone: string;
+  status: "pending" | "approved" | "rejected";
+  requested_at: string;
+  reviewed_at: string | null;
+  note: string | null;
+};
+
+export type PasswordResetRequest = {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  status: "pending" | "resolved" | "rejected";
+  requested_at: string;
+  reviewed_at: string | null;
+  note: string | null;
+  user_id: string | null;
+  user_name: string | null;
 };
 
 export type StudentSummary = {
