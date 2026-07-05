@@ -1,0 +1,10 @@
+node_modules
+client/dist
+server/dist
+android
+.env
+.env.*
+*.jks
+*.keystore
+npm-debug.log*
+logs

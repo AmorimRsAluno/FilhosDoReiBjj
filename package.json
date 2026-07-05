@@ -1,0 +1,23 @@
+{
+  "name": "filhos-do-rei-bjj",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm.cmd run dev -w server\" \"npm.cmd run dev -w client\"",
+    "build": "npm.cmd run build -w client && npm.cmd run build -w server",
+    "build:production": "npm.cmd run build -w client && npm.cmd run build -w server",
+    "db:create-admin": "npm.cmd run db:create-admin -w server",
+    "db:migrate": "npm.cmd run db:migrate -w server",
+    "android:sync": "npm.cmd run build -w client && npx.cmd cap sync android",
+    "android:open": "npx.cmd cap open android",
+    "db:setup": "npm.cmd run db:setup -w server"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
+    "concurrently": "^9.2.1"
+  }
+}

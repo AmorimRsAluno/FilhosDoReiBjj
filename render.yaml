@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: filhos-do-rei-api
+    env: node
+    plan: starter
+    buildCommand: npm ci && npm run build -w server
+    startCommand: npm run start -w server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3333
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: true
+      - key: DATABASE_SSL_REJECT_UNAUTHORIZED
+        value: true
+      - key: JWT_SECRET
+        sync: false
+      - key: CORS_ORIGIN
+        value: https://www.filhosdoreibjj.com,https://filhosdoreibjj.com

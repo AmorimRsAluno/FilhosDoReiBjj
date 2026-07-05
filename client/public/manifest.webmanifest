@@ -1,0 +1,27 @@
+{
+  "name": "Filhos do Rei BJJ - William Lago",
+  "short_name": "Filhos do Rei",
+  "description": "Sistema da academia Filhos do Rei BJJ",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0D0D0D",
+  "theme_color": "#0D0D0D",
+  "categories": ["sports", "health", "education"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

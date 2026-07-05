@@ -1,0 +1,159 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0d0d0d;
+  color: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    linear-gradient(135deg, rgba(255, 196, 15, 0.08), transparent 22rem),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 12px),
+    linear-gradient(140deg, #0d0d0d 0%, #151515 48%, #070707 100%);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.brand-panel {
+  background:
+    linear-gradient(145deg, rgba(0, 0, 0, 0.68), rgba(13, 13, 13, 0.94)),
+    repeating-linear-gradient(150deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 14px);
+}
+
+.logo-glow {
+  filter: drop-shadow(0 0 22px rgba(255, 196, 15, 0.34));
+}
+
+.login-screen {
+  background:
+    radial-gradient(circle at 50% 24%, rgba(255, 196, 15, 0.16), transparent 19rem),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.026) 0 1px, transparent 1px 13px),
+    linear-gradient(145deg, #050505 0%, #0d0d0d 45%, #151515 100%);
+}
+
+.login-card {
+  backdrop-filter: blur(18px);
+}
+
+.login-logo-button {
+  display: grid;
+  place-items: center;
+  width: 172px;
+  height: 172px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 196, 15, 0.12), transparent 68%);
+  cursor: pointer;
+}
+
+.login-logo-spin {
+  width: 148px;
+  height: 148px;
+  animation: logo-spin 22s linear infinite;
+  transition:
+    transform 260ms ease,
+    filter 260ms ease;
+}
+
+.login-logo-button:hover .login-logo-spin {
+  animation-duration: 3.2s;
+  transform: scale(1.06);
+  filter: drop-shadow(0 0 32px rgba(255, 196, 15, 0.55));
+}
+
+@keyframes logo-spin {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
+  }
+}
+
+.xp-confirmed {
+  animation: xp-card 900ms ease-out 1;
+}
+
+.xp-spark {
+  animation: xp-spark 1100ms ease-out 1;
+  box-shadow: 0 0 0 0 rgba(255, 196, 15, 0.38);
+}
+
+@keyframes xp-card {
+  0% {
+    border-color: rgba(255, 196, 15, 0.9);
+    transform: translateY(2px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes xp-spark {
+  0% {
+    transform: scale(0.86);
+    box-shadow: 0 0 0 0 rgba(255, 196, 15, 0.52);
+  }
+  55% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 12px rgba(255, 196, 15, 0);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.belt-card {
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    background 180ms ease;
+}
+
+.belt-card:hover {
+  border-color: rgba(255, 196, 15, 0.38);
+  transform: translateY(-1px);
+}
+
+.belt-bar {
+  box-shadow:
+    inset 0 8px 12px rgba(255, 255, 255, 0.12),
+    inset 0 -10px 14px rgba(0, 0, 0, 0.32),
+    0 12px 20px rgba(0, 0, 0, 0.28);
+  transition: transform 180ms ease;
+}
+
+.belt-card:hover .belt-bar {
+  transform: scaleX(1.012);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #353535;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111;
+}
