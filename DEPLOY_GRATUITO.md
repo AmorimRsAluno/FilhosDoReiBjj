@@ -69,7 +69,7 @@ npm.cmd run db:create-admin
 ```text
 Name: filhos-do-rei-api
 Runtime: Node
-Build Command: npm ci && npm run build -w server
+Build Command: npm ci --include=dev && npm run build -w server
 Start Command: npm run start -w server
 Health Check Path: /api/health
 ```

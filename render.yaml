@@ -3,7 +3,7 @@ services:
     name: filhos-do-rei-api
     env: node
     plan: starter
-    buildCommand: npm ci && npm run build -w server
+    buildCommand: npm ci --include=dev && npm run build -w server
     startCommand: npm run start -w server
     healthCheckPath: /api/health
     envVars:
