@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   Clock,
   CreditCard,
+  Download,
   FileSpreadsheet,
   FileText,
   Home,
@@ -96,6 +97,10 @@ const studentNav = [
 
 type AdminTab = (typeof adminNav)[number]["key"];
 type StudentTab = (typeof studentNav)[number]["key"];
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(() => {
@@ -132,6 +137,27 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [installed, setInstalled] = useState(() => window.matchMedia?.("(display-mode: standalone)").matches ?? false);
+
+  useEffect(() => {
+    function handleBeforeInstallPrompt(event: Event) {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    }
+
+    function handleInstalled() {
+      setInstalled(true);
+      setInstallPrompt(null);
+    }
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -192,6 +218,14 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     }
   }
 
+  async function installApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    const choice = await installPrompt.userChoice;
+    if (choice.outcome === "accepted") setInstalled(true);
+    setInstallPrompt(null);
+  }
+
   return (
     <main className="login-screen grid min-h-screen place-items-center px-4 py-8">
       <Card className="login-card w-full max-w-[420px] border-royal-gold/20 p-6 sm:p-8">
@@ -205,6 +239,12 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
           </button>
           <h1 className="mt-6 text-xl font-black tracking-wide text-white">FILHOS DO REI BJJ</h1>
           <p className="mt-1 text-sm font-bold tracking-[0.14em] text-royal-gold">WILLIAM LAGO</p>
+          {installPrompt && !installed && (
+            <button type="button" className="pwa-install-button mx-auto mt-5" onClick={installApp}>
+              <Download size={16} />
+              Instalar aplicativo
+            </button>
+          )}
         </div>
         {mode === "login" && (
         <form className="space-y-4" onSubmit={submit}>

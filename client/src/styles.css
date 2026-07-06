@@ -78,6 +78,36 @@ select {
   filter: drop-shadow(0 0 32px rgba(255, 196, 15, 0.55));
 }
 
+.pwa-install-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 196, 15, 0.42);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 196, 15, 0.18), rgba(255, 196, 15, 0.08)),
+    rgba(0, 0, 0, 0.36);
+  color: #ffc40f;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 800;
+  box-shadow: 0 12px 30px rgba(255, 196, 15, 0.1);
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    background 180ms ease;
+}
+
+.pwa-install-button:hover {
+  border-color: rgba(255, 196, 15, 0.78);
+  background:
+    linear-gradient(180deg, rgba(255, 196, 15, 0.28), rgba(255, 196, 15, 0.12)),
+    rgba(0, 0, 0, 0.42);
+  transform: translateY(-1px);
+}
+
 @keyframes logo-spin {
   from {
     rotate: 0deg;

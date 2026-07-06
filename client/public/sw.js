@@ -1,5 +1,15 @@
-const CACHE_NAME = "filhos-do-rei-pwa-v1";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/logo-filhos-do-rei.png", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
+const CACHE_NAME = "filhos-do-rei-pwa-v2";
+const APP_SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/logo-filhos-do-rei.png",
+  "/icon-192.png",
+  "/icon-384.png",
+  "/icon-512.png",
+  "/maskable-icon-512.png",
+  "/mstile-150.png",
+  "/apple-touch-icon.png"
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
