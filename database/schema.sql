@@ -81,13 +81,39 @@ CREATE TABLE IF NOT EXISTS teachers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS membership_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,
+  audience TEXT NOT NULL DEFAULT 'Geral',
+  monthly_value NUMERIC(10,2) NOT NULL CHECK (monthly_value >= 0),
+  due_day INTEGER NOT NULL DEFAULT 10 CHECK (due_day BETWEEN 1 AND 28),
+  billing_cycle TEXT NOT NULL DEFAULT 'monthly' CHECK (billing_cycle IN ('monthly')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO membership_plans (name, audience, monthly_value, due_day, billing_cycle, status, description)
+VALUES
+  ('Jovens e Adultos Mensal', 'Jovens e adultos', 120.00, 10, 'monthly', 'active', 'Plano mensal para jovens e adultos.'),
+  ('Kids Mensal', 'Kids', 80.00, 10, 'monthly', 'active', 'Plano mensal para alunos kids.')
+ON CONFLICT (name) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS students (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID UNIQUE REFERENCES users(id) ON DELETE SET NULL,
   full_name TEXT NOT NULL,
   email TEXT UNIQUE,
   phone TEXT,
+  phone_ddd TEXT,
   birth_date DATE,
+  cpf TEXT,
+  address TEXT,
+  zip_code TEXT,
+  plan_id UUID REFERENCES membership_plans(id) ON DELETE SET NULL,
+  billing_due_date DATE,
+  billing_notify BOOLEAN NOT NULL DEFAULT true,
   belt TEXT NOT NULL DEFAULT 'Branca',
   stripe_count INTEGER NOT NULL DEFAULT 0 CHECK (stripe_count BETWEEN 0 AND 4),
   classes_until_next_stripe INTEGER NOT NULL DEFAULT 12 CHECK (classes_until_next_stripe >= 0),
@@ -100,6 +126,14 @@ CREATE TABLE IF NOT EXISTS students (
 );
 
 ALTER TABLE students ADD COLUMN IF NOT EXISTS classes_until_next_stripe INTEGER NOT NULL DEFAULT 12 CHECK (classes_until_next_stripe >= 0);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS phone_ddd TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS cpf TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS address TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS zip_code TEXT;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS plan_id UUID REFERENCES membership_plans(id) ON DELETE SET NULL;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS billing_due_date DATE;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS billing_notify BOOLEAN NOT NULL DEFAULT true;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_students_cpf_unique ON students(cpf) WHERE cpf IS NOT NULL AND cpf <> '';
 
 CREATE TABLE IF NOT EXISTS payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -263,6 +297,8 @@ CREATE TABLE IF NOT EXISTS xp_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_student_status ON payments(student_id, status);
+CREATE INDEX IF NOT EXISTS idx_students_plan ON students(plan_id);
+CREATE INDEX IF NOT EXISTS idx_membership_plans_status ON membership_plans(status);
 CREATE INDEX IF NOT EXISTS idx_financial_entries_date_type ON financial_entries(entry_date, type);
 CREATE INDEX IF NOT EXISTS idx_attendance_student_checkin ON attendance(student_id, check_in_at);
 CREATE INDEX IF NOT EXISTS idx_classes_date ON classes(class_date);

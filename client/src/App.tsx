@@ -32,6 +32,7 @@ import {
   type Competition,
   type FinanceEntry,
   type FinanceSummary,
+  type MembershipPlan,
   type Payment,
   type Product,
   type RankingItem,
@@ -54,7 +55,15 @@ const beltOptions = ["Branca", "Cinza", "Amarela", "Laranja", "Verde", "Azul", "
 const emptyStudentForm = {
   fullName: "",
   email: "",
+  birthDate: "",
+  cpf: "",
+  phoneDdd: "",
   phone: "",
+  address: "",
+  zipCode: "",
+  planId: "",
+  billingDueDate: "",
+  billingNotify: true,
   belt: "Branca",
   stripeCount: 0,
   classesUntilNextStripe: 12,
@@ -65,6 +74,7 @@ const permissionOptions = [
   ["dashboard", "Dashboard"],
   ["students", "Alunos"],
   ["finance", "Financeiro"],
+  ["plans", "Planos"],
   ["attendance", "Presença"],
   ["techniques", "Técnicas"],
   ["ranking", "Ranking"],
@@ -78,6 +88,7 @@ const adminNav = [
   { key: "dashboard", label: "Dashboard", icon: Home },
   { key: "students", label: "Alunos", icon: Users },
   { key: "finance", label: "Financeiro", icon: CreditCard },
+  { key: "plans", label: "Planos", icon: CreditCard },
   { key: "attendance", label: "Presença", icon: ClipboardCheck },
   { key: "techniques", label: "Técnicas", icon: BookOpen },
   { key: "ranking", label: "Ranking", icon: Trophy },
@@ -336,6 +347,7 @@ function AdminApp({ session, onLogout }: { session: Session; onLogout: () => voi
       {tab === "dashboard" && <AdminDashboardView token={session.token} />}
       {tab === "students" && <StudentsPanel token={session.token} />}
       {tab === "finance" && <FinancePanel token={session.token} isAdmin />}
+      {tab === "plans" && <PlansPanel token={session.token} />}
       {tab === "attendance" && <AttendancePanel token={session.token} />}
       {tab === "techniques" && <TechniquesPanel token={session.token} isAdmin />}
       {tab === "ranking" && <RankingPanel token={session.token} />}
@@ -373,15 +385,26 @@ function UsersPanel({ token }: { token: string }) {
   const resets = useApi<PasswordResetRequest[]>("/admin/password-reset-requests", token);
   const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [reviewingRegistrationId, setReviewingRegistrationId] = useState<string | null>(null);
 
   async function reviewRegistration(id: string, status: "approved" | "rejected") {
-    await request(`/admin/registration-requests/${id}`, token, {
-      method: "PATCH",
-      body: JSON.stringify({ status })
-    });
-    setMessage(status === "approved" ? "Cadastro aprovado." : "Cadastro recusado.");
-    registrations.reload();
-    users.reload();
+    setMessage("");
+    setErrorMessage("");
+    setReviewingRegistrationId(id);
+    try {
+      await request(`/admin/registration-requests/${id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ status })
+      });
+      setMessage(status === "approved" ? "Cadastro aprovado." : "Cadastro recusado.");
+      registrations.reload();
+      users.reload();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Não foi possível revisar o cadastro.");
+    } finally {
+      setReviewingRegistrationId(null);
+    }
   }
 
   async function reviewReset(id: string, status: "resolved" | "rejected") {
@@ -397,6 +420,7 @@ function UsersPanel({ token }: { token: string }) {
     <div className="space-y-5">
       <PageTitle title="Usuários e permissões" subtitle="Aprovação de cadastro, recuperação de senha e controle de acesso" />
       {message && <Card className="border-royal-gold/40 text-sm text-royal-gold">{message}</Card>}
+      {errorMessage && <ErrorBox message={errorMessage} />}
 
       <Card>
         <h3 className="text-lg font-bold text-white">Cadastros pendentes</h3>
@@ -409,8 +433,8 @@ function UsersPanel({ token }: { token: string }) {
                   <p className="mt-1 text-sm text-royal-muted">{item.email} · {item.phone}</p>
                 </div>
                 <div className="flex gap-2">
-                  <Button onClick={() => reviewRegistration(item.id, "approved")}>Aprovar</Button>
-                  <Button variant="danger" onClick={() => reviewRegistration(item.id, "rejected")}>Recusar</Button>
+                  <Button disabled={reviewingRegistrationId === item.id} onClick={() => reviewRegistration(item.id, "approved")}>Aprovar</Button>
+                  <Button disabled={reviewingRegistrationId === item.id} variant="danger" onClick={() => reviewRegistration(item.id, "rejected")}>Recusar</Button>
                 </div>
               </div>
             </div>
@@ -636,11 +660,131 @@ function AdminDashboardView({ token }: { token: string }) {
   );
 }
 
+function PlansPanel({ token }: { token: string }) {
+  const { data, loading, error, reload } = useApi<MembershipPlan[]>("/plans", token);
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    audience: "",
+    monthlyValue: 120,
+    dueDay: 10,
+    description: "",
+    status: "active"
+  });
+
+  async function savePlan(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await request(editingPlanId ? `/plans/${editingPlanId}` : "/plans", token, {
+        method: editingPlanId ? "PUT" : "POST",
+        body: JSON.stringify(form)
+      });
+      setEditingPlanId(null);
+      setForm({ name: "", audience: "", monthlyValue: 120, dueDay: 10, description: "", status: "active" });
+      reload();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function editPlan(plan: MembershipPlan) {
+    setEditingPlanId(plan.id);
+    setForm({
+      name: plan.name,
+      audience: plan.audience,
+      monthlyValue: Number(plan.monthly_value),
+      dueDay: Number(plan.due_day),
+      description: plan.description ?? "",
+      status: plan.status
+    });
+  }
+
+  return (
+    <div className="space-y-5">
+      <PageTitle title="Gerência de planos" subtitle="Tipos de mensalidade, valores e vencimento padrão dos alunos" />
+      <Card>
+        <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-6" onSubmit={savePlan}>
+          <Input className="xl:col-span-2" placeholder="Nome do plano" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <Input placeholder="Público" value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value })} required />
+          <Input min={0} step="0.01" type="number" placeholder="Valor mensal" value={form.monthlyValue} onChange={(e) => setForm({ ...form, monthlyValue: Number(e.target.value) })} required />
+          <Input min={1} max={28} type="number" placeholder="Dia venc." value={form.dueDay} onChange={(e) => setForm({ ...form, dueDay: Number(e.target.value) })} required />
+          <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <option value="active">Ativo</option>
+            <option value="inactive">Inativo</option>
+          </Select>
+          <Input className="md:col-span-2 xl:col-span-5" placeholder="Observações do plano" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <Button disabled={saving}>
+            {editingPlanId ? <Save size={16} /> : <Plus size={16} />}
+            {editingPlanId ? "Salvar plano" : "Adicionar plano"}
+          </Button>
+          {editingPlanId && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="xl:col-start-6"
+              onClick={() => {
+                setEditingPlanId(null);
+                setForm({ name: "", audience: "", monthlyValue: 120, dueDay: 10, description: "", status: "active" });
+              }}
+            >
+              Cancelar
+            </Button>
+          )}
+        </form>
+      </Card>
+      {loading && <Loading title="Carregando planos" />}
+      {error && <ErrorBox message={error} />}
+      {data && (
+        <div className="grid gap-3 md:grid-cols-2">
+          {data.map((plan) => (
+            <Card key={plan.id} className="grid gap-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-bold text-white">{plan.name}</h3>
+                    <Badge tone={plan.status === "active" ? "green" : "neutral"}>{plan.status === "active" ? "Ativo" : "Inativo"}</Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-royal-muted">{plan.audience}</p>
+                </div>
+                <p className="text-right text-xl font-black text-royal-gold">{formatMoney(plan.monthly_value)}</p>
+              </div>
+              <div className="grid gap-2 text-sm text-zinc-300 sm:grid-cols-2">
+                <span>Mensalidade recorrente</span>
+                <span>Vencimento padrão: dia {plan.due_day}</span>
+              </div>
+              {plan.description && <p className="text-sm text-royal-muted">{plan.description}</p>}
+              <div className="flex justify-end">
+                <Button variant="ghost" onClick={() => editPlan(plan)}>
+                  <Pencil size={16} /> Editar
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StudentsPanel({ token }: { token: string }) {
   const { data, loading, error, reload } = useApi<Student[]>("/students", token);
+  const plans = useApi<MembershipPlan[]>("/plans", token);
   const [form, setForm] = useState(emptyStudentForm);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const activePlans = (plans.data ?? []).filter((plan) => plan.status === "active");
+  const filteredStudents = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!data || !term) return data ?? [];
+    return data.filter((student) =>
+      [student.full_name, student.email, student.phone, student.cpf, student.plan_name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(term))
+    );
+  }, [data, search]);
 
   async function createStudent(event: React.FormEvent) {
     event.preventDefault();
@@ -663,7 +807,15 @@ function StudentsPanel({ token }: { token: string }) {
     setForm({
       fullName: student.full_name,
       email: student.email ?? "",
+      birthDate: student.birth_date ? student.birth_date.slice(0, 10) : "",
+      cpf: student.cpf ?? "",
+      phoneDdd: student.phone_ddd ?? "",
       phone: student.phone ?? "",
+      address: student.address ?? "",
+      zipCode: student.zip_code ?? "",
+      planId: student.plan_id ?? "",
+      billingDueDate: student.billing_due_date ? student.billing_due_date.slice(0, 10) : "",
+      billingNotify: Boolean(student.billing_notify),
       belt: student.belt,
       stripeCount: Number(student.stripe_count ?? 0),
       classesUntilNextStripe: Number(student.classes_until_next_stripe ?? 0),
@@ -686,16 +838,30 @@ function StudentsPanel({ token }: { token: string }) {
     <div className="space-y-5">
       <PageTitle title="Gestão de alunos" subtitle="Cadastro, faixa, graus, frequência e status financeiro" />
       <Card>
-        <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-7" onSubmit={createStudent}>
-          <Input placeholder="Nome completo" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} required />
-          <Input
-            placeholder="E-mail"
-            type="email"
-            value={form.email}
-            disabled={Boolean(editingStudentId)}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
-          />
-          <Input placeholder="Telefone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+        <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-6" onSubmit={createStudent}>
+          <Input className="xl:col-span-2" placeholder="Nome completo" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} required />
+          <Input placeholder="Nascimento" type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
+          <Input placeholder="CPF" value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} />
+          <Input placeholder="E-mail" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <div className="grid grid-cols-[82px_1fr] gap-2">
+            <Input placeholder="DDD" value={form.phoneDdd} onChange={(e) => setForm({ ...form, phoneDdd: e.target.value })} />
+            <Input placeholder="Telefone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </div>
+          <Input className="md:col-span-2 xl:col-span-3" placeholder="Endereço" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+          <Input placeholder="CEP" value={form.zipCode} onChange={(e) => setForm({ ...form, zipCode: e.target.value })} />
+          <Select value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })} required>
+            <option value="">Escolha o plano</option>
+            {activePlans.map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {plan.name} - {formatMoney(plan.monthly_value)}
+              </option>
+            ))}
+          </Select>
+          <Input type="date" placeholder="Vencimento" value={form.billingDueDate} onChange={(e) => setForm({ ...form, billingDueDate: e.target.value })} />
+          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-royal-line bg-black/30 px-3 text-sm text-zinc-200">
+            <input type="checkbox" checked={form.billingNotify} onChange={(e) => setForm({ ...form, billingNotify: e.target.checked })} />
+            Notificar vencimento por WhatsApp e e-mail
+          </label>
           <Select value={form.belt} onChange={(e) => setForm({ ...form, belt: e.target.value })}>
             {beltOptions.map((belt) => (
               <option key={belt}>{belt}</option>
@@ -715,6 +881,7 @@ function StudentsPanel({ token }: { token: string }) {
             value={form.classesUntilNextStripe}
             onChange={(e) => setForm({ ...form, classesUntilNextStripe: Number(e.target.value) })}
           />
+          <Input className="md:col-span-2 xl:col-span-4" placeholder="Objetivos e observações" value={form.goals} onChange={(e) => setForm({ ...form, goals: e.target.value })} />
           <Button disabled={saving}>
             {editingStudentId ? <Save size={16} /> : <Plus size={16} />}
             {editingStudentId ? "Salvar" : "Cadastrar"}
@@ -726,11 +893,18 @@ function StudentsPanel({ token }: { token: string }) {
           )}
         </form>
       </Card>
+      <Card>
+        <Input
+          placeholder="Pesquisar aluno por nome, e-mail, telefone, CPF ou plano"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+      </Card>
       {loading && <Loading title="Carregando alunos" />}
       {error && <ErrorBox message={error} />}
       {data && (
         <div className="grid gap-3">
-          {data.map((student) => (
+          {filteredStudents.map((student) => (
             <Card key={student.id} className="grid gap-4 md:grid-cols-[auto_1fr_auto_auto] md:items-center">
               <Avatar src={student.photo_url} name={student.full_name} />
               <div>
@@ -738,10 +912,15 @@ function StudentsPanel({ token }: { token: string }) {
                   <h3 className="font-bold text-white">{student.full_name}</h3>
                   <Badge tone="gold">{student.belt}</Badge>
                   <Badge>{student.stripe_count} grau{Number(student.stripe_count) === 1 ? "" : "s"}</Badge>
+                  {student.plan_name && <Badge tone="green">{student.plan_name}</Badge>}
                   {statusBadge(student.payment_status)}
                 </div>
                 <p className="mt-1 text-sm text-royal-muted">
                   {student.phone || "Sem telefone"} · {Number(student.monthly_attendance ?? 0)} treinos no mês · Nível {student.level}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {student.phone_ddd ? `DDD ${student.phone_ddd} · ` : ""}{student.cpf ? `CPF ${student.cpf} · ` : ""}
+                  {student.plan_value ? `${formatMoney(student.plan_value)} mensal` : "Sem plano"} · Vencimento {student.billing_due_date ? formatDate(student.billing_due_date) : student.due_date ? formatDate(student.due_date) : "não definido"} · {student.billing_notify ? "Notifica vencimento" : "Sem notificação"}
                 </p>
               </div>
               <BeltProgress belt={student.belt} stripes={student.stripe_count} remaining={student.classes_until_next_stripe} compact />

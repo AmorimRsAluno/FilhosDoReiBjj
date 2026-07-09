@@ -60,12 +60,37 @@ export type StudentSummary = {
 export type Student = StudentSummary & {
   email: string;
   phone: string;
+  phone_ddd: string | null;
+  birth_date: string | null;
+  cpf: string | null;
+  address: string | null;
+  zip_code: string | null;
+  plan_id: string | null;
+  plan_name: string | null;
+  plan_value: string | null;
+  plan_due_day: number | null;
+  plan_status: string | null;
+  billing_due_date: string | null;
+  billing_notify: boolean;
   status: string;
   goals: string;
   monthly_attendance: string;
   payment_status: "paid" | "pending" | "overdue" | null;
   due_date: string | null;
   payment_value: string | null;
+};
+
+export type MembershipPlan = {
+  id: string;
+  name: string;
+  audience: string;
+  monthly_value: string;
+  due_day: number;
+  billing_cycle: "monthly";
+  status: "active" | "inactive";
+  description: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AdminDashboard = {

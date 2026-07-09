@@ -39,6 +39,7 @@ const permissionKeys = [
   "dashboard",
   "students",
   "finance",
+  "plans",
   "attendance",
   "techniques",
   "ranking",
@@ -49,8 +50,8 @@ const permissionKeys = [
 ] as const;
 const defaultRolePermissions: Record<string, string[]> = {
   admin: [...permissionKeys],
-  teacher: ["dashboard", "students", "attendance", "techniques", "ranking", "store", "competitions", "registrations"],
-  finance: ["dashboard", "finance"],
+  teacher: ["dashboard", "students", "plans", "attendance", "techniques", "ranking", "store", "competitions", "registrations"],
+  finance: ["dashboard", "finance", "plans"],
   student: ["dashboard", "finance", "techniques", "ranking", "store", "competitions"]
 };
 const passwordSchema = z
@@ -62,6 +63,34 @@ const phoneSchema = z
   .string()
   .transform((value) => value.replace(/\D/g, ""))
   .refine((value) => value.length === 10 || value.length === 11, "Telefone precisa ter DDD e 10 ou 11 dígitos.");
+
+const nullableText = z.string().optional().or(z.literal(""));
+const planPayloadSchema = z.object({
+  name: z.string().min(3),
+  audience: z.string().min(2).default("Geral"),
+  monthlyValue: z.coerce.number().min(0),
+  dueDay: z.coerce.number().int().min(1).max(28).default(10),
+  description: nullableText,
+  status: z.enum(["active", "inactive"]).default("active")
+});
+const studentPayloadSchema = z.object({
+  fullName: z.string().min(3),
+  email: z.string().email().optional().or(z.literal("")),
+  phoneDdd: z.string().max(3).optional().or(z.literal("")),
+  phone: z.string().optional().or(z.literal("")),
+  birthDate: z.string().optional().or(z.literal("")),
+  cpf: z.string().optional().or(z.literal("")),
+  address: z.string().optional().or(z.literal("")),
+  zipCode: z.string().optional().or(z.literal("")),
+  planId: z.string().uuid().optional().or(z.literal("")),
+  billingDueDate: z.string().optional().or(z.literal("")),
+  billingNotify: z.coerce.boolean().default(true),
+  belt: z.string().default("Branca"),
+  stripeCount: z.coerce.number().int().min(0).max(4).default(0),
+  classesUntilNextStripe: z.coerce.number().int().min(0).default(12),
+  goals: z.string().optional(),
+  status: z.string().default("active")
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: "Filhos do Rei BJJ API" });
@@ -230,27 +259,33 @@ app.patch("/api/admin/registration-requests/:id", requireAuth, requireRole(["adm
     }
 
     if (parsed.data.status === "approved") {
+      const phoneDigits = onlyDigits(requestRow.phone);
       const user = await client.query<{ id: string }>(
         `INSERT INTO users (name, email, phone, password_hash, role, avatar_url)
          VALUES ($1, $2, $3, $4, 'student', $5)
+         ON CONFLICT (email)
+         DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, password_hash = EXCLUDED.password_hash, role = 'student', avatar_url = EXCLUDED.avatar_url
          RETURNING id`,
         [
           requestRow.full_name,
           requestRow.email,
-          requestRow.phone,
+          phoneDigits,
           requestRow.password_hash,
           `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(requestRow.full_name)}`
         ]
       );
 
       await client.query(
-        `INSERT INTO students (user_id, full_name, email, phone, belt, stripe_count, classes_until_next_stripe, goals, photo_url)
-         VALUES ($1, $2, $3, $4, 'Branca', 0, 12, 'Cadastro aprovado. Definir objetivos com o professor.', $5)`,
+        `INSERT INTO students (user_id, full_name, email, phone_ddd, phone, belt, stripe_count, classes_until_next_stripe, goals, photo_url)
+         VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), 'Branca', 0, 12, 'Cadastro aprovado. Definir objetivos com o professor.', $6)
+         ON CONFLICT (user_id)
+         DO UPDATE SET full_name = EXCLUDED.full_name, email = EXCLUDED.email, phone_ddd = EXCLUDED.phone_ddd, phone = EXCLUDED.phone`,
         [
           user.rows[0].id,
           requestRow.full_name,
           requestRow.email,
-          requestRow.phone,
+          phoneDigits.slice(0, 2),
+          phoneDigits.slice(2),
           `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(requestRow.full_name)}`
         ]
       );
@@ -448,14 +483,76 @@ app.get(
   }
 );
 
+app.get("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]), async (_req, res) => {
+  const result = await query(
+    `SELECT id, name, audience, monthly_value, due_day, billing_cycle, status, description, created_at, updated_at
+     FROM membership_plans
+     ORDER BY status, monthly_value, name`
+  );
+  res.json(result.rows);
+});
+
+app.post("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  const parsed = planPayloadSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Dados do plano invÃ¡lidos." });
+  }
+
+  const result = await query(
+    `INSERT INTO membership_plans (name, audience, monthly_value, due_day, billing_cycle, status, description)
+     VALUES ($1, $2, $3, $4, 'monthly', $5, NULLIF($6, ''))
+     RETURNING *`,
+    [
+      parsed.data.name,
+      parsed.data.audience,
+      parsed.data.monthlyValue,
+      parsed.data.dueDay,
+      parsed.data.status,
+      parsed.data.description ?? ""
+    ]
+  );
+  res.status(201).json(result.rows[0]);
+});
+
+app.put("/api/plans/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  const parsed = planPayloadSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Dados do plano invÃ¡lidos." });
+  }
+
+  const result = await query(
+    `UPDATE membership_plans
+     SET name = $1, audience = $2, monthly_value = $3, due_day = $4, status = $5, description = NULLIF($6, ''), updated_at = now()
+     WHERE id = $7
+     RETURNING *`,
+    [
+      parsed.data.name,
+      parsed.data.audience,
+      parsed.data.monthlyValue,
+      parsed.data.dueDay,
+      parsed.data.status,
+      parsed.data.description ?? "",
+      req.params.id
+    ]
+  );
+
+  if (!result.rows[0]) return res.status(404).json({ message: "Plano nÃ£o encontrado." });
+  res.json(result.rows[0]);
+});
+
 app.get("/api/students", requireAuth, requireRole(["admin", "teacher", "finance"]), async (_req, res) => {
   const result = await query(
     `SELECT s.*,
+      mp.name AS plan_name,
+      mp.monthly_value AS plan_value,
+      mp.due_day AS plan_due_day,
+      mp.status AS plan_status,
       COALESCE(COUNT(a.id) FILTER (WHERE a.check_in_at >= date_trunc('month', now())), 0) AS monthly_attendance,
       p.status AS payment_status,
       p.due_date,
       p.value AS payment_value
      FROM students s
+     LEFT JOIN membership_plans mp ON mp.id = s.plan_id
      LEFT JOIN attendance a ON a.student_id = s.id
      LEFT JOIN LATERAL (
        SELECT status, due_date, value
@@ -464,7 +561,7 @@ app.get("/api/students", requireAuth, requireRole(["admin", "teacher", "finance"
        ORDER BY due_date DESC
        LIMIT 1
      ) p ON true
-     GROUP BY s.id, p.status, p.due_date, p.value
+     GROUP BY s.id, mp.id, p.status, p.due_date, p.value
      ORDER BY s.created_at DESC`
   );
 
@@ -472,6 +569,110 @@ app.get("/api/students", requireAuth, requireRole(["admin", "teacher", "finance"
 });
 
 app.post("/api/students", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  const parsed = studentPayloadSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Dados do aluno invÃ¡lidos." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `INSERT INTO students (
+        full_name, email, phone_ddd, phone, birth_date, cpf, address, zip_code, plan_id, billing_due_date,
+        billing_notify, belt, stripe_count, classes_until_next_stripe, goals, photo_url
+       )
+       VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, '')::date, NULLIF($6, ''),
+        NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, '')::uuid, NULLIF($10, '')::date, $11, $12, $13, $14, $15, $16)
+       RETURNING *`,
+      [
+        parsed.data.fullName,
+        parsed.data.email ?? "",
+        parsed.data.phoneDdd ?? "",
+        parsed.data.phone ?? "",
+        parsed.data.birthDate ?? "",
+        onlyDigits(parsed.data.cpf ?? ""),
+        parsed.data.address ?? "",
+        onlyDigits(parsed.data.zipCode ?? ""),
+        parsed.data.planId ?? "",
+        parsed.data.billingDueDate ?? "",
+        parsed.data.billingNotify,
+        parsed.data.belt,
+        parsed.data.stripeCount,
+        parsed.data.classesUntilNextStripe,
+        parsed.data.goals ?? "Treinar 3x por semana e evoluir fundamentos.",
+        `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(parsed.data.fullName)}`
+      ]
+    );
+
+    await syncMembershipPayment(client, result.rows[0].id, parsed.data.planId, parsed.data.billingDueDate);
+    await client.query("COMMIT");
+    return res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.put("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  const parsed = studentPayloadSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Dados do aluno invÃ¡lidos." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `UPDATE students
+       SET full_name = $1, email = NULLIF($2, ''), phone_ddd = NULLIF($3, ''), phone = NULLIF($4, ''),
+        birth_date = NULLIF($5, '')::date, cpf = NULLIF($6, ''), address = NULLIF($7, ''), zip_code = NULLIF($8, ''),
+        plan_id = NULLIF($9, '')::uuid, billing_due_date = NULLIF($10, '')::date, billing_notify = $11,
+        belt = $12, stripe_count = $13, classes_until_next_stripe = $14, goals = $15, status = $16
+       WHERE id = $17
+       RETURNING *`,
+      [
+        parsed.data.fullName,
+        parsed.data.email ?? "",
+        parsed.data.phoneDdd ?? "",
+        parsed.data.phone ?? "",
+        parsed.data.birthDate ?? "",
+        onlyDigits(parsed.data.cpf ?? ""),
+        parsed.data.address ?? "",
+        onlyDigits(parsed.data.zipCode ?? ""),
+        parsed.data.planId ?? "",
+        parsed.data.billingDueDate ?? "",
+        parsed.data.billingNotify,
+        parsed.data.belt,
+        parsed.data.stripeCount,
+        parsed.data.classesUntilNextStripe,
+        parsed.data.goals ?? "",
+        parsed.data.status,
+        req.params.id
+      ]
+    );
+
+    if (!result.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Aluno nÃ£o encontrado." });
+    }
+
+    await syncMembershipPayment(client, String(req.params.id), parsed.data.planId, parsed.data.billingDueDate);
+    await client.query("COMMIT");
+    return res.json(result.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/students-legacy-disabled", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   const parsed = z
     .object({
       fullName: z.string().min(3),
@@ -507,7 +708,7 @@ app.post("/api/students", requireAuth, requireRole(["admin", "teacher"]), async 
   res.status(201).json(result.rows[0]);
 });
 
-app.put("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.put("/api/students-legacy-disabled/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   const parsed = z
     .object({
       fullName: z.string().min(3),
@@ -1579,6 +1780,59 @@ async function getFinanceReport() {
     },
     entries: entries.rows
   };
+}
+
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function nextDueDate(dueDay: number) {
+  const now = new Date();
+  const candidate = new Date(now.getFullYear(), now.getMonth(), dueDay);
+  if (candidate < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+    candidate.setMonth(candidate.getMonth() + 1);
+  }
+  return candidate.toISOString().slice(0, 10);
+}
+
+function referenceMonth(date: string) {
+  return new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(`${date}T00:00:00`));
+}
+
+async function syncMembershipPayment(client: Pick<typeof pool, "query">, studentId: string, planId?: string, billingDueDate?: string) {
+  if (!planId) return;
+
+  const planResult = await client.query<{ name: string; monthly_value: string; due_day: number }>(
+    "SELECT name, monthly_value, due_day FROM membership_plans WHERE id = $1 AND status = 'active'",
+    [planId]
+  );
+  const plan = planResult.rows[0];
+  if (!plan) return;
+
+  const dueDate = billingDueDate || nextDueDate(Number(plan.due_day ?? 10));
+  const month = referenceMonth(dueDate);
+  const pixCode = `PIX ${plan.name} ${studentId.slice(0, 8)} ${month}`;
+  const latestPending = await client.query<{ id: string }>(
+    "SELECT id FROM payments WHERE student_id = $1 AND status = 'pending' ORDER BY due_date DESC LIMIT 1",
+    [studentId]
+  );
+
+  if (latestPending.rows[0]) {
+    await client.query("UPDATE payments SET reference_month = $1, due_date = $2, value = $3, pix_code = $4 WHERE id = $5", [
+      month,
+      dueDate,
+      plan.monthly_value,
+      pixCode,
+      latestPending.rows[0].id
+    ]);
+    return;
+  }
+
+  await client.query(
+    `INSERT INTO payments (student_id, reference_month, due_date, value, status, pix_code)
+     VALUES ($1, $2, $3, $4, 'pending', $5)`,
+    [studentId, month, dueDate, plan.monthly_value, pixCode]
+  );
 }
 
 async function resolveStudentId(userId?: string, fallback?: unknown) {

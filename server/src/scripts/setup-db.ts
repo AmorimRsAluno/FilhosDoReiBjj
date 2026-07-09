@@ -16,9 +16,9 @@ const avatars = {
 };
 
 const rolePermissions: Record<string, string[]> = {
-  admin: ["dashboard", "students", "finance", "attendance", "techniques", "ranking", "store", "competitions", "users", "registrations"],
-  teacher: ["dashboard", "students", "attendance", "techniques", "ranking", "store", "competitions", "registrations"],
-  finance: ["dashboard", "finance"],
+  admin: ["dashboard", "students", "finance", "plans", "attendance", "techniques", "ranking", "store", "competitions", "users", "registrations"],
+  teacher: ["dashboard", "students", "plans", "attendance", "techniques", "ranking", "store", "competitions", "registrations"],
+  finance: ["dashboard", "finance", "plans"],
   student: ["dashboard", "finance", "techniques", "ranking", "store", "competitions"]
 };
 

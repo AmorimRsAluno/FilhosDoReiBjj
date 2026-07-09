@@ -21,7 +21,7 @@ async function main() {
     [name, username, email, passwordHash, `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(name)}`]
   );
 
-  const permissions = ["dashboard", "students", "finance", "attendance", "techniques", "ranking", "store", "competitions", "users", "registrations"];
+  const permissions = ["dashboard", "students", "finance", "plans", "attendance", "techniques", "ranking", "store", "competitions", "users", "registrations"];
   await pool.query("DELETE FROM user_permissions WHERE user_id = $1", [result.rows[0].id]);
   for (const permission of permissions) {
     await pool.query("INSERT INTO user_permissions (user_id, permission_key) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
