@@ -20,4 +20,4 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: CORS_ORIGIN
-        value: https://www.filhosdoreibjj.com,https://filhosdoreibjj.com
+        value: https://filhos-do-rei-bjj-client.vercel.app,https://www.filhosdoreibjj.com,https://filhosdoreibjj.com

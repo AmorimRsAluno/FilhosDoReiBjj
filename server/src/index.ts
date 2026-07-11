@@ -11,10 +11,20 @@ import { requireAuth, requireRole, signToken } from "./middleware/auth.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3333);
-const corsOrigins = (process.env.CORS_ORIGIN ?? "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const defaultCorsOrigins = [
+  "https://filhos-do-rei-bjj-client.vercel.app",
+  "https://www.filhosdoreibjj.com",
+  "https://filhosdoreibjj.com"
+];
+const corsOrigins = Array.from(
+  new Set([
+    ...defaultCorsOrigins,
+    ...(process.env.CORS_ORIGIN ?? "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+  ])
+);
 
 app.use(
   cors({
