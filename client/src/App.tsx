@@ -19,6 +19,7 @@ import {
   Save,
   Shield,
   ShoppingBag,
+  Trash2,
   Trophy,
   UserPlus,
   Users
@@ -48,7 +49,7 @@ import {
   formatMoney,
   request
 } from "./lib/api";
-import { Badge, Button, Card, EmptyState, Input, Select } from "./components/ui";
+import { Badge, Button, Card, CheckboxField, EmptyState, Field, Input, Select } from "./components/ui";
 
 const sessionKey = "filhos-do-rei-session";
 const beltOptions = ["Branca", "Cinza", "Amarela", "Laranja", "Verde", "Azul", "Roxa", "Marrom", "Preta"] as const;
@@ -838,59 +839,106 @@ function StudentsPanel({ token }: { token: string }) {
     <div className="space-y-5">
       <PageTitle title="Gestão de alunos" subtitle="Cadastro, faixa, graus, frequência e status financeiro" />
       <Card>
-        <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-6" onSubmit={createStudent}>
-          <Input className="xl:col-span-2" placeholder="Nome completo" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} required />
-          <Input placeholder="Nascimento" type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
-          <Input placeholder="CPF" value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} />
-          <Input placeholder="E-mail" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <div className="grid grid-cols-[82px_1fr] gap-2">
-            <Input placeholder="DDD" value={form.phoneDdd} onChange={(e) => setForm({ ...form, phoneDdd: e.target.value })} />
-            <Input placeholder="Telefone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+        <form className="space-y-5" onSubmit={createStudent}>
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="space-y-3 lg:col-span-2">
+              <p className="text-sm font-bold text-white">Dados pessoais</p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Nome completo" hint="Ex.: João Pedro Silva" className="md:col-span-2">
+                  <Input placeholder="Digite o nome completo do aluno" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} required />
+                </Field>
+                <Field label="Nascimento" hint="Data de nascimento do aluno">
+                  <Input type="date" value={form.birthDate} onChange={(e) => setForm({ ...form, birthDate: e.target.value })} />
+                </Field>
+                <Field label="CPF" hint="Documento do aluno">
+                  <Input placeholder="000.000.000-00" value={form.cpf} onChange={(e) => setForm({ ...form, cpf: e.target.value })} />
+                </Field>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <p className="text-sm font-bold text-white">Contato</p>
+              <Field label="E-mail" hint="Usado para acesso e avisos">
+                <Input placeholder="aluno@email.com" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+              </Field>
+              <div className="grid grid-cols-[92px_1fr] gap-2">
+                <Field label="DDD">
+                  <Input placeholder="11" value={form.phoneDdd} onChange={(e) => setForm({ ...form, phoneDdd: e.target.value })} />
+                </Field>
+                <Field label="Telefone">
+                  <Input placeholder="99999-9999" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                </Field>
+              </div>
+            </div>
           </div>
-          <Input className="md:col-span-2 xl:col-span-3" placeholder="Endereço" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-          <Input placeholder="CEP" value={form.zipCode} onChange={(e) => setForm({ ...form, zipCode: e.target.value })} />
-          <Select value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })} required>
-            <option value="">Escolha o plano</option>
-            {activePlans.map((plan) => (
-              <option key={plan.id} value={plan.id}>
-                {plan.name} - {formatMoney(plan.monthly_value)}
-              </option>
-            ))}
-          </Select>
-          <Input type="date" placeholder="Vencimento" value={form.billingDueDate} onChange={(e) => setForm({ ...form, billingDueDate: e.target.value })} />
-          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-royal-line bg-black/30 px-3 text-sm text-zinc-200">
-            <input type="checkbox" checked={form.billingNotify} onChange={(e) => setForm({ ...form, billingNotify: e.target.checked })} />
-            Notificar vencimento por WhatsApp e e-mail
-          </label>
-          <Select value={form.belt} onChange={(e) => setForm({ ...form, belt: e.target.value })}>
-            {beltOptions.map((belt) => (
-              <option key={belt}>{belt}</option>
-            ))}
-          </Select>
-          <Select value={form.stripeCount} onChange={(e) => setForm({ ...form, stripeCount: Number(e.target.value) })}>
-            {[0, 1, 2, 3, 4].map((stripe) => (
-              <option key={stripe} value={stripe}>
-                {stripe} grau{stripe === 1 ? "" : "s"}
-              </option>
-            ))}
-          </Select>
-          <Input
-            min={0}
-            type="number"
-            placeholder="Aulas p/ grau"
-            value={form.classesUntilNextStripe}
-            onChange={(e) => setForm({ ...form, classesUntilNextStripe: Number(e.target.value) })}
-          />
-          <Input className="md:col-span-2 xl:col-span-4" placeholder="Objetivos e observações" value={form.goals} onChange={(e) => setForm({ ...form, goals: e.target.value })} />
-          <Button disabled={saving}>
-            {editingStudentId ? <Save size={16} /> : <Plus size={16} />}
-            {editingStudentId ? "Salvar" : "Cadastrar"}
-          </Button>
-          {editingStudentId && (
-            <Button type="button" variant="ghost" className="xl:col-start-7" onClick={cancelEdit}>
-              Cancelar
+
+          <div className="grid gap-3 md:grid-cols-[1.5fr_.6fr]">
+            <Field label="Endereço" hint="Rua, número, bairro e cidade">
+              <Input placeholder="Rua Exemplo, 123 - Centro" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+            </Field>
+            <Field label="CEP">
+              <Input placeholder="00000-000" value={form.zipCode} onChange={(e) => setForm({ ...form, zipCode: e.target.value })} />
+            </Field>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr]">
+            <Field label="Plano" hint="Define o valor da mensalidade">
+              <Select value={form.planId} onChange={(e) => setForm({ ...form, planId: e.target.value })} required>
+                <option value="">Selecione um plano</option>
+                {activePlans.map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name} - {formatMoney(plan.monthly_value)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Vencimento" hint="Data da primeira mensalidade">
+              <Input type="date" value={form.billingDueDate} onChange={(e) => setForm({ ...form, billingDueDate: e.target.value })} />
+            </Field>
+            <CheckboxField
+              checked={form.billingNotify}
+              onChange={(e) => setForm({ ...form, billingNotify: e.target.checked })}
+              label="Notificar vencimento"
+              hint="WhatsApp e e-mail quando configurados"
+            />
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <Field label="Faixa">
+              <Select value={form.belt} onChange={(e) => setForm({ ...form, belt: e.target.value })}>
+                {beltOptions.map((belt) => (
+                  <option key={belt}>{belt}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Graus">
+              <Select value={form.stripeCount} onChange={(e) => setForm({ ...form, stripeCount: Number(e.target.value) })}>
+                {[0, 1, 2, 3, 4].map((stripe) => (
+                  <option key={stripe} value={stripe}>
+                    {stripe} grau{stripe === 1 ? "" : "s"}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Aulas para próximo grau" hint="Contador definido pelo professor">
+              <Input min={0} type="number" placeholder="12" value={form.classesUntilNextStripe} onChange={(e) => setForm({ ...form, classesUntilNextStripe: Number(e.target.value) })} />
+            </Field>
+          </div>
+
+          <Field label="Objetivos e observações" hint="Metas, restrições, observações médicas ou orientação do professor">
+            <Input placeholder="Ex.: melhorar defesa de guarda e treinar 3x por semana" value={form.goals} onChange={(e) => setForm({ ...form, goals: e.target.value })} />
+          </Field>
+
+          <div className="flex flex-wrap gap-2">
+            <Button disabled={saving}>
+              {editingStudentId ? <Save size={16} /> : <Plus size={16} />}
+              {editingStudentId ? "Salvar aluno" : "Cadastrar aluno"}
             </Button>
-          )}
+            {editingStudentId && (
+              <Button type="button" variant="ghost" onClick={cancelEdit}>
+                Cancelar
+              </Button>
+            )}
+          </div>
         </form>
       </Card>
       <Card>
@@ -1341,6 +1389,8 @@ function AttendancePanel({ token }: { token: string }) {
   const [classId, setClassId] = useState("");
   const [studentId, setStudentId] = useState("");
   const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [savingAttendance, setSavingAttendance] = useState(false);
 
   useEffect(() => {
     if (classes.data?.[0] && !classId) setClassId(classes.data[0].id);
@@ -1350,12 +1400,26 @@ function AttendancePanel({ token }: { token: string }) {
   async function registerAttendance(event: React.FormEvent) {
     event.preventDefault();
     setMessage("");
-    const result = await request<{ registered: boolean }>("/attendance", token, {
-      method: "POST",
-      body: JSON.stringify({ classId, studentId })
-    });
-    setMessage(result.registered ? "Presença registrada e +50 XP aplicado." : "Presença já estava registrada.");
-    classes.reload();
+    setErrorMessage("");
+    if (!classId || !studentId) {
+      setErrorMessage("Selecione a aula e o aluno antes de registrar a presença.");
+      return;
+    }
+
+    setSavingAttendance(true);
+    try {
+      const result = await request<{ registered: boolean }>("/attendance", token, {
+        method: "POST",
+        body: JSON.stringify({ classId, studentId })
+      });
+      setMessage(result.registered ? "Presença registrada e +50 XP aplicado." : "Presença já estava registrada.");
+      classes.reload();
+      students.reload();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Não foi possível registrar a presença.");
+    } finally {
+      setSavingAttendance(false);
+    }
   }
 
   async function reviewCheckin(id: string, status: "approved" | "rejected") {
@@ -1411,25 +1475,32 @@ function AttendancePanel({ token }: { token: string }) {
         </div>
       </Card>
       <Card>
-        <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={registerAttendance}>
-          <Select value={classId} onChange={(e) => setClassId(e.target.value)}>
-            {classes.data?.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.title} · {formatDateTime(item.class_date)}
-              </option>
-            ))}
-          </Select>
-          <Select value={studentId} onChange={(e) => setStudentId(e.target.value)}>
-            {students.data?.map((student) => (
-              <option value={student.id} key={student.id}>
-                {student.full_name}
-              </option>
-            ))}
-          </Select>
-          <Button>
-            <ClipboardCheck size={16} /> Registrar
+        <form className="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_auto] lg:items-end" onSubmit={registerAttendance}>
+          <Field label="Aula" hint={classes.loading ? "Carregando aulas..." : "Escolha a aula que recebeu a presença"}>
+            <Select value={classId} onChange={(e) => setClassId(e.target.value)} disabled={classes.loading || !classes.data?.length}>
+              <option value="">Selecione uma aula</option>
+              {classes.data?.map((item) => (
+                <option value={item.id} key={item.id}>
+                  {item.title} - {formatDateTime(item.class_date)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Aluno" hint={students.loading ? "Carregando alunos..." : "Escolha quem participou do treino"}>
+            <Select value={studentId} onChange={(e) => setStudentId(e.target.value)} disabled={students.loading || !students.data?.length}>
+              <option value="">Selecione um aluno</option>
+              {students.data?.map((student) => (
+                <option value={student.id} key={student.id}>
+                  {student.full_name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Button disabled={savingAttendance || !classId || !studentId}>
+            <ClipboardCheck size={16} /> {savingAttendance ? "Registrando..." : "Registrar"}
           </Button>
         </form>
+        {errorMessage && <ErrorBox message={errorMessage} />}
         {message && <p className="mt-3 text-sm text-royal-gold">{message}</p>}
       </Card>
       <div className="grid gap-3">
@@ -1672,6 +1743,15 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
     reload();
   }
 
+  async function removeProduct(product: Product) {
+    const confirmed = window.confirm(`Excluir "${product.name}" da loja? O histórico financeiro já lançado será preservado.`);
+    if (!confirmed) return;
+
+    const result = await request<{ archived?: boolean } | undefined>(`/products/${product.id}`, token, { method: "DELETE" });
+    setMessage(result?.archived ? "Produto removido da loja e histórico preservado." : "Produto excluído da loja.");
+    reload();
+  }
+
   return (
     <div className="space-y-5">
       <PageTitle title="Loja da academia" subtitle="Produtos, estoque, disponibilidade e vendas vinculadas ao financeiro" />
@@ -1754,6 +1834,9 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
                     </Button>
                     <Button variant="ghost" onClick={() => updateAvailability(product, !product.available)}>
                       {product.available ? "Indisponível" : "Disponibilizar"}
+                    </Button>
+                    <Button variant="danger" onClick={() => removeProduct(product)}>
+                      <Trash2 size={16} /> Excluir
                     </Button>
                   </div>
                 </div>

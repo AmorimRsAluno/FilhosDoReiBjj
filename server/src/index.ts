@@ -505,7 +505,7 @@ app.get("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]),
 app.post("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
   const parsed = planPayloadSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ message: "Dados do plano invÃ¡lidos." });
+    return res.status(400).json({ message: "Dados do plano inválidos." });
   }
 
   const result = await query(
@@ -527,7 +527,7 @@ app.post("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"])
 app.put("/api/plans/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
   const parsed = planPayloadSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ message: "Dados do plano invÃ¡lidos." });
+    return res.status(400).json({ message: "Dados do plano inválidos." });
   }
 
   const result = await query(
@@ -546,7 +546,7 @@ app.put("/api/plans/:id", requireAuth, requireRole(["admin", "teacher", "finance
     ]
   );
 
-  if (!result.rows[0]) return res.status(404).json({ message: "Plano nÃ£o encontrado." });
+  if (!result.rows[0]) return res.status(404).json({ message: "Plano não encontrado." });
   res.json(result.rows[0]);
 });
 
@@ -582,7 +582,7 @@ app.post("/api/students", requireAuth, requireRole(["admin", "teacher"]), async 
   const parsed = studentPayloadSchema.safeParse(req.body);
 
   if (!parsed.success) {
-    return res.status(400).json({ message: "Dados do aluno invÃ¡lidos." });
+    return res.status(400).json({ message: "Dados do aluno inválidos." });
   }
 
   const client = await pool.connect();
@@ -631,7 +631,7 @@ app.put("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), asy
   const parsed = studentPayloadSchema.safeParse(req.body);
 
   if (!parsed.success) {
-    return res.status(400).json({ message: "Dados do aluno invÃ¡lidos." });
+    return res.status(400).json({ message: "Dados do aluno inválidos." });
   }
 
   const client = await pool.connect();
@@ -668,7 +668,7 @@ app.put("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), asy
 
     if (!result.rows[0]) {
       await client.query("ROLLBACK");
-      return res.status(404).json({ message: "Aluno nÃ£o encontrado." });
+      return res.status(404).json({ message: "Aluno não encontrado." });
     }
 
     await syncMembershipPayment(client, String(req.params.id), parsed.data.planId, parsed.data.billingDueDate);
@@ -1579,7 +1579,7 @@ app.post("/api/competitions/:id/confirm", requireAuth, async (req, res) => {
 });
 
 app.get("/api/products", requireAuth, async (_req, res) => {
-  const result = await query("SELECT * FROM products ORDER BY available DESC, category, name");
+  const result = await query("SELECT * FROM products WHERE archived_at IS NULL ORDER BY available DESC, category, name");
   res.json(result.rows);
 });
 
@@ -1728,7 +1728,18 @@ app.post("/api/products/:id/sell", requireAuth, requireRole(["admin", "teacher"]
 });
 
 app.delete("/api/products/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
-  await query("DELETE FROM products WHERE id = $1", [req.params.id]);
+  const orders = await query<{ total: string }>("SELECT COUNT(*) AS total FROM orders WHERE product_id = $1", [req.params.id]);
+  if (Number(orders.rows[0]?.total ?? 0) > 0) {
+    const archived = await query(
+      "UPDATE products SET available = false, stock = 0, archived_at = now() WHERE id = $1 RETURNING id",
+      [req.params.id]
+    );
+    if (!archived.rows[0]) return res.status(404).json({ message: "Produto não encontrado." });
+    return res.json({ archived: true });
+  }
+
+  const deleted = await query("DELETE FROM products WHERE id = $1 RETURNING id", [req.params.id]);
+  if (!deleted.rows[0]) return res.status(404).json({ message: "Produto não encontrado." });
   res.status(204).end();
 });
 

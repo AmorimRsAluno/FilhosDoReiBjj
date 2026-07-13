@@ -30,6 +30,15 @@ select {
   font: inherit;
 }
 
+select option {
+  background: #0d0d0d;
+  color: #ffffff;
+}
+
+input[type="date"] {
+  color-scheme: dark;
+}
+
 .brand-panel {
   background:
     linear-gradient(145deg, rgba(0, 0, 0, 0.68), rgba(13, 13, 13, 0.94)),

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { InputHTMLAttributes, ReactNode } from "react";
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
@@ -46,9 +46,53 @@ export function Input({ className = "", ...props }: React.InputHTMLAttributes<HT
 export function Select({ className = "", ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
-      className={`min-h-11 w-full rounded-lg border border-royal-line bg-black/30 px-3 text-sm text-white outline-none transition focus:border-royal-gold ${className}`}
+      className={`min-h-11 w-full rounded-lg border border-royal-line bg-black/30 px-3 text-sm text-white outline-none transition focus:border-royal-gold disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
       {...props}
     />
+  );
+}
+
+export function Field({
+  label,
+  hint,
+  className = "",
+  children
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className={`block ${className}`}>
+      <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.12em] text-royal-gold/85">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-xs text-royal-muted">{hint}</span>}
+    </label>
+  );
+}
+
+export function CheckboxField({
+  label,
+  hint,
+  className = "",
+  ...props
+}: InputHTMLAttributes<HTMLInputElement> & {
+  label: string;
+  hint?: string;
+}) {
+  return (
+    <label className={`flex min-h-11 items-center gap-3 rounded-lg border border-royal-line bg-black/30 px-3 py-2 text-sm text-zinc-200 ${className}`}>
+      <input
+        type="checkbox"
+        className="h-4 w-4 rounded border-royal-line bg-black accent-royal-gold"
+        {...props}
+      />
+      <span>
+        <span className="block font-semibold text-white">{label}</span>
+        {hint && <span className="block text-xs text-royal-muted">{hint}</span>}
+      </span>
+    </label>
   );
 }
 
