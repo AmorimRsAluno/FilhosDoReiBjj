@@ -934,18 +934,24 @@ app.get("/api/student/finance", requireAuth, async (req, res) => {
   res.json(result.rows);
 });
 
-app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "finance"]), async (_req, res) => {
+app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  const period = financePeriod(req.query.month);
   const [entries, payments, pendingPayments] = await Promise.all([
     query<{ type: string; total: string }>(
       `SELECT type, COALESCE(SUM(amount), 0) AS total
        FROM financial_entries
-       WHERE status = 'paid' AND date_trunc('month', entry_date) = date_trunc('month', CURRENT_DATE)
-       GROUP BY type`
+       WHERE status = 'paid' AND entry_date >= $1::date AND entry_date < $2::date
+       GROUP BY type`,
+      [period.startDate, period.endDate]
     ),
     query<{ total: string }>(
-      "SELECT COALESCE(SUM(value), 0) AS total FROM payments WHERE status = 'paid' AND date_trunc('month', paid_at) = date_trunc('month', CURRENT_DATE)"
+      "SELECT COALESCE(SUM(value), 0) AS total FROM payments WHERE status = 'paid' AND paid_at >= $1::date AND paid_at < $2::date",
+      [period.startDate, period.endDate]
     ),
-    query<{ total: string }>("SELECT COALESCE(SUM(value), 0) AS total FROM payments WHERE status IN ('pending', 'overdue')")
+    query<{ total: string }>(
+      "SELECT COALESCE(SUM(value), 0) AS total FROM payments WHERE status IN ('pending', 'overdue') AND due_date >= $1::date AND due_date < $2::date",
+      [period.startDate, period.endDate]
+    )
   ]);
 
   const extraIncome = money(entries.rows.find((row) => row.type === "income")?.total);
@@ -963,13 +969,16 @@ app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "f
   });
 });
 
-app.get("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "finance"]), async (_req, res) => {
+app.get("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  const period = financePeriod(req.query.month);
   const result = await query(
     `SELECT fe.*, u.name AS created_by_name
      FROM financial_entries fe
      LEFT JOIN users u ON u.id = fe.created_by
+     WHERE fe.entry_date >= $1::date AND fe.entry_date < $2::date
      ORDER BY fe.entry_date DESC, fe.created_at DESC
-     LIMIT 80`
+     LIMIT 200`,
+    [period.startDate, period.endDate]
   );
   res.json(result.rows);
 });
@@ -980,8 +989,8 @@ app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teach
     return res.status(400).json({ message: "Formato inválido." });
   }
 
-  const report = await getFinanceReport();
-  const filename = `relatorio-financeiro-filhos-do-rei-${new Date().toISOString().slice(0, 10)}.${format}`;
+  const report = await getFinanceReport(req.query.month);
+  const filename = `relatorio-financeiro-filhos-do-rei-${report.period.month}.${format}`;
 
   if (format === "xlsx") {
     const workbook = new ExcelJS.Workbook();
@@ -999,16 +1008,16 @@ app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teach
     sheet.getRow(1).height = 34;
 
     sheet.mergeCells("A2:G2");
-    sheet.getCell("A2").value = `Relatório financeiro gerado em ${brDate(new Date())}`;
+    sheet.getCell("A2").value = `Relatório financeiro de ${report.period.label} gerado em ${brDate(new Date())}`;
     sheet.getCell("A2").font = { color: { argb: "FFFFFFFF" }, size: 11 };
     sheet.getCell("A2").alignment = { horizontal: "center" };
     sheet.getCell("A2").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1B1B1B" } };
 
     const summaryRows = [
-      ["Receitas do mês", report.summary.income],
+      ["Receitas do período", report.summary.income],
       ["Mensalidades recebidas", report.summary.membershipIncome],
       ["Receitas avulsas", report.summary.extraIncome],
-      ["Gastos do mês", report.summary.expenses],
+      ["Gastos do período", report.summary.expenses],
       ["Lucro líquido", report.summary.profit],
       ["Mensalidades a receber", report.summary.receivable]
     ];
@@ -1127,6 +1136,7 @@ app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teach
         {
           children: [
             new Paragraph({ children: [new TextRun({ text: "Filhos do Rei BJJ - Relatório Financeiro", bold: true, size: 32 })] }),
+            new Paragraph(`Período: ${report.period.label}`),
             new Paragraph(`Gerado em ${brDate(new Date())}`),
             new Paragraph(""),
             new Paragraph(`Receitas: ${brl(report.summary.income)}`),
@@ -1156,6 +1166,7 @@ app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teach
 
   pdf.fontSize(18).text("Filhos do Rei BJJ - Relatório Financeiro", { underline: true });
   pdf.moveDown();
+  pdf.fontSize(11).text(`Período: ${report.period.label}`);
   pdf.fontSize(11).text(`Gerado em ${brDate(new Date())}`);
   pdf.moveDown();
   pdf.text(`Receitas: ${brl(report.summary.income)}`);
@@ -1757,18 +1768,37 @@ app.get("/api/posts", requireAuth, async (_req, res) => {
   res.json(result.rows.map((row) => ({ ...row, likes: Number(row.likes), comments: Number(row.comments) })));
 });
 
-async function getFinanceReport() {
+function financePeriod(month?: unknown) {
+  const raw = typeof month === "string" && /^\d{4}-\d{2}$/.test(month) ? month : new Date().toISOString().slice(0, 7);
+  const [year, monthNumber] = raw.split("-").map(Number);
+  const next = monthNumber === 12 ? { year: year + 1, month: 1 } : { year, month: monthNumber + 1 };
+  const startDate = `${year}-${String(monthNumber).padStart(2, "0")}-01`;
+  const endDate = `${next.year}-${String(next.month).padStart(2, "0")}-01`;
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(
+    new Date(`${startDate}T00:00:00Z`)
+  );
+
+  return { month: raw, startDate, endDate, label };
+}
+
+async function getFinanceReport(month?: unknown) {
+  const period = financePeriod(month);
   const [entriesTotals, payments, pendingPayments, entries] = await Promise.all([
     query<{ type: string; total: string }>(
       `SELECT type, COALESCE(SUM(amount), 0) AS total
        FROM financial_entries
-       WHERE status = 'paid' AND date_trunc('month', entry_date) = date_trunc('month', CURRENT_DATE)
-       GROUP BY type`
+       WHERE status = 'paid' AND entry_date >= $1::date AND entry_date < $2::date
+       GROUP BY type`,
+      [period.startDate, period.endDate]
     ),
     query<{ total: string }>(
-      "SELECT COALESCE(SUM(value), 0) AS total FROM payments WHERE status = 'paid' AND date_trunc('month', paid_at) = date_trunc('month', CURRENT_DATE)"
+      "SELECT COALESCE(SUM(value), 0) AS total FROM payments WHERE status = 'paid' AND paid_at >= $1::date AND paid_at < $2::date",
+      [period.startDate, period.endDate]
     ),
-    query<{ total: string }>("SELECT COALESCE(SUM(value), 0) AS total FROM payments WHERE status IN ('pending', 'overdue')"),
+    query<{ total: string }>(
+      "SELECT COALESCE(SUM(value), 0) AS total FROM payments WHERE status IN ('pending', 'overdue') AND due_date >= $1::date AND due_date < $2::date",
+      [period.startDate, period.endDate]
+    ),
     query<{
       type: string;
       category: string;
@@ -1780,8 +1810,10 @@ async function getFinanceReport() {
     }>(
       `SELECT type, category, description, amount, entry_date, status, payment_method
        FROM financial_entries
+       WHERE entry_date >= $1::date AND entry_date < $2::date
        ORDER BY entry_date DESC, created_at DESC
-       LIMIT 200`
+       LIMIT 200`,
+      [period.startDate, period.endDate]
     )
   ]);
 
@@ -1791,6 +1823,7 @@ async function getFinanceReport() {
   const income = membershipIncome + extraIncome;
 
   return {
+    period,
     summary: {
       income,
       membershipIncome,

@@ -1218,8 +1218,10 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
 }
 
 function BusinessFinancePanel({ token }: { token: string }) {
-  const summary = useApi<FinanceSummary>("/finance/summary", token);
-  const entries = useApi<FinanceEntry[]>("/finance/entries", token);
+  const [period, setPeriod] = useState(currentMonthValue());
+  const periodLabel = formatMonthValue(period);
+  const summary = useApi<FinanceSummary>(`/finance/summary?month=${period}`, token);
+  const entries = useApi<FinanceEntry[]>(`/finance/entries?month=${period}`, token);
   const [form, setForm] = useState({
     type: "expense",
     category: "Aluguel",
@@ -1260,7 +1262,7 @@ function BusinessFinancePanel({ token }: { token: string }) {
 
   async function downloadReport(format: "xlsx" | "pdf" | "docx") {
     setReportMessage("");
-    const response = await fetch(`${API_URL}/finance/report/${format}`, {
+    const response = await fetch(`${API_URL}/finance/report/${format}?month=${period}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
 
@@ -1273,7 +1275,7 @@ function BusinessFinancePanel({ token }: { token: string }) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `relatorio-financeiro-filhos-do-rei.${format}`;
+    link.download = `relatorio-financeiro-filhos-do-rei-${period}.${format}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -1285,8 +1287,9 @@ function BusinessFinancePanel({ token }: { token: string }) {
 
     const text = [
       "Relatório financeiro - Filhos do Rei BJJ",
-      `Receitas do mês: ${formatMoney(summary.data.income)}`,
-      `Gastos do mês: ${formatMoney(summary.data.expenses)}`,
+      `Período: ${periodLabel}`,
+      `Receitas do período: ${formatMoney(summary.data.income)}`,
+      `Gastos do período: ${formatMoney(summary.data.expenses)}`,
       `Lucro líquido: ${formatMoney(summary.data.profit)}`,
       `Mensalidades a receber: ${formatMoney(summary.data.receivable)}`,
       `Lançamentos cadastrados: ${entries.data?.length ?? 0}`
@@ -1299,10 +1302,24 @@ function BusinessFinancePanel({ token }: { token: string }) {
     <div className="space-y-5">
       <PageTitle title="Financeiro geral" subtitle="Receitas, gastos, lucro líquido e lançamentos livres da academia" />
       <Card>
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto_auto] lg:items-end">
+          <Field label="Mês de consulta" hint="Escolha o mês para ver histórico, lançamentos e relatórios">
+            <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value || currentMonthValue())} />
+          </Field>
+          <Button type="button" variant="ghost" onClick={() => setPeriod(shiftMonthValue(period, -1))}>
+            Mês anterior
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => setPeriod(currentMonthValue())}>
+            Mês atual
+          </Button>
+          <Badge tone="gold">{periodLabel}</Badge>
+        </div>
+      </Card>
+      <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-bold text-white">Relatórios</h3>
-            <p className="mt-1 text-sm text-royal-muted">Exporte o financeiro ou envie um resumo direto para o WhatsApp.</p>
+            <p className="mt-1 text-sm text-royal-muted">Exporte o financeiro de {periodLabel} ou envie um resumo direto para o WhatsApp.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={() => downloadReport("xlsx")}>
@@ -1323,8 +1340,8 @@ function BusinessFinancePanel({ token }: { token: string }) {
       </Card>
       {summary.data && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard icon={<CreditCard />} label="Receitas do mês" value={formatMoney(summary.data.income)} />
-          <StatCard icon={<CreditCard />} label="Gastos do mês" value={formatMoney(summary.data.expenses)} danger />
+          <StatCard icon={<CreditCard />} label="Receitas do período" value={formatMoney(summary.data.income)} />
+          <StatCard icon={<CreditCard />} label="Gastos do período" value={formatMoney(summary.data.expenses)} danger />
           <StatCard icon={<Trophy />} label="Lucro líquido" value={formatMoney(summary.data.profit)} danger={summary.data.profit < 0} />
           <StatCard icon={<Shield />} label="Mensalidades a receber" value={formatMoney(summary.data.receivable)} />
         </div>
@@ -1353,6 +1370,7 @@ function BusinessFinancePanel({ token }: { token: string }) {
 
       {entries.loading && <Loading title="Carregando lançamentos" />}
       {entries.error && <ErrorBox message={entries.error} />}
+      {!entries.loading && entries.data?.length === 0 && <EmptyState>Nenhum lançamento encontrado em {periodLabel}.</EmptyState>}
       <div className="grid gap-3">
         {entries.data?.map((entry) => (
           <Card key={entry.id} className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
@@ -2140,6 +2158,22 @@ function imageFileToProfileDataUrl(file: File) {
 
     image.src = objectUrl;
   });
+}
+
+function currentMonthValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function shiftMonthValue(value: string, amount: number) {
+  const [year, month] = value.split("-").map(Number);
+  const date = new Date(year, month - 1 + amount, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatMonthValue(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
 }
 
 function Loading({ title }: { title: string }) {
