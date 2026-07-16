@@ -787,12 +787,13 @@ function StudentsPanel({ token }: { token: string }) {
     );
   }, [data, search]);
 
-  async function createStudent(event: React.FormEvent) {
+  async function saveStudent(event: React.FormEvent) {
     event.preventDefault();
+    if (!editingStudentId) return;
     setSaving(true);
     try {
-      await request<Student>(editingStudentId ? `/students/${editingStudentId}` : "/students", token, {
-        method: editingStudentId ? "PUT" : "POST",
+      await request<Student>(`/students/${editingStudentId}`, token, {
+        method: "PUT",
         body: JSON.stringify(form)
       });
       setForm(emptyStudentForm);
@@ -830,16 +831,12 @@ function StudentsPanel({ token }: { token: string }) {
     setForm(emptyStudentForm);
   }
 
-  async function removeStudent(id: string) {
-    await request(`/students/${id}`, token, { method: "DELETE" });
-    reload();
-  }
-
   return (
     <div className="space-y-5">
-      <PageTitle title="Gestão de alunos" subtitle="Cadastro, faixa, graus, frequência e status financeiro" />
+      <PageTitle title="Gestão de alunos" subtitle="Atualização cadastral, graduação, frequência e status financeiro" />
+      {editingStudentId ? (
       <Card>
-        <form className="space-y-5" onSubmit={createStudent}>
+        <form className="space-y-5" onSubmit={saveStudent}>
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="space-y-3 lg:col-span-2">
               <p className="text-sm font-bold text-white">Dados pessoais</p>
@@ -930,17 +927,25 @@ function StudentsPanel({ token }: { token: string }) {
 
           <div className="flex flex-wrap gap-2">
             <Button disabled={saving}>
-              {editingStudentId ? <Save size={16} /> : <Plus size={16} />}
-              {editingStudentId ? "Salvar aluno" : "Cadastrar aluno"}
+              <Save size={16} /> {saving ? "Salvando..." : "Salvar alterações"}
             </Button>
-            {editingStudentId && (
-              <Button type="button" variant="ghost" onClick={cancelEdit}>
-                Cancelar
-              </Button>
-            )}
+            <Button type="button" variant="ghost" onClick={cancelEdit}>
+              Cancelar
+            </Button>
           </div>
         </form>
       </Card>
+      ) : (
+        <Card className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="text-lg font-black text-white">Selecione um aluno para editar</h3>
+            <p className="mt-1 text-sm text-royal-muted">
+              Novos cadastros devem ser feitos pelo aluno na tela inicial. O professor aprova o cadastro e, depois, usa esta aba apenas para corrigir dados, plano, faixa, graus e aulas para a próxima graduação.
+            </p>
+          </div>
+          <Badge tone="gold">Edição somente após aprovação</Badge>
+        </Card>
+      )}
       <Card>
         <Input
           placeholder="Pesquisar aluno por nome, e-mail, telefone, CPF ou plano"
@@ -975,9 +980,6 @@ function StudentsPanel({ token }: { token: string }) {
               <div className="flex flex-wrap gap-2 md:justify-end">
                 <Button variant="ghost" onClick={() => editStudent(student)}>
                   <Pencil size={16} /> Editar
-                </Button>
-                <Button variant="danger" onClick={() => removeStudent(student.id)}>
-                  Remover
                 </Button>
               </div>
             </Card>

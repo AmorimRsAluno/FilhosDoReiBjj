@@ -9,8 +9,17 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   </React.StrictMode>
 );
 
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+  });
+}
+
+if ("serviceWorker" in navigator && import.meta.env.DEV) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => registration.unregister());
+  });
+  caches.keys().then((keys) => {
+    keys.filter((key) => key.startsWith("filhos-do-rei")).forEach((key) => caches.delete(key));
   });
 }
