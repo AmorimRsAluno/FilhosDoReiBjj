@@ -349,8 +349,8 @@ app.patch("/api/admin/password-reset-requests/:id", requireAuth, requireRole(["a
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const reset = await client.query<{ id: string; user_id: string | null; status: string }>(
-      "SELECT id, user_id, status FROM password_reset_requests WHERE id = $1 FOR UPDATE",
+    const reset = await client.query<{ id: string; user_id: string | null; email: string | null; phone: string | null; status: string }>(
+      "SELECT id, user_id, email, phone, status FROM password_reset_requests WHERE id = $1 FOR UPDATE",
       [req.params.id]
     );
     const row = reset.rows[0];
@@ -360,20 +360,38 @@ app.patch("/api/admin/password-reset-requests/:id", requireAuth, requireRole(["a
       return res.status(404).json({ message: "Solicitação não encontrada." });
     }
 
+    if (row.status !== "pending") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: "Solicitação já revisada." });
+    }
+
+    let userId = row.user_id;
+
     if (parsed.data.status === "resolved") {
-      if (!row.user_id) {
+      if (!userId) {
+        const fallbackUser = await client.query<{ id: string }>(
+          `SELECT id FROM users
+           WHERE ($1::text IS NOT NULL AND lower(email) = lower($1))
+              OR ($2::text IS NOT NULL AND phone = $2)
+           LIMIT 1`,
+          [row.email, row.phone ? onlyDigits(row.phone) : null]
+        );
+        userId = fallbackUser.rows[0]?.id ?? null;
+      }
+
+      if (!userId) {
         await client.query("ROLLBACK");
         return res.status(404).json({ message: "Usuário não encontrado para esta solicitação." });
       }
-      await client.query("UPDATE users SET password_hash = $1 WHERE id = $2", [await bcrypt.hash(parsed.data.newPassword!, 10), row.user_id]);
+      await client.query("UPDATE users SET password_hash = $1 WHERE id = $2", [await bcrypt.hash(parsed.data.newPassword!, 10), userId]);
     }
 
     const updated = await client.query(
       `UPDATE password_reset_requests
-       SET status = $1, reviewed_at = now(), reviewed_by = $2, note = $3
+       SET status = $1, reviewed_at = now(), reviewed_by = $2, note = $3, user_id = COALESCE(user_id, $5)
        WHERE id = $4
        RETURNING *`,
-      [parsed.data.status, req.user?.id, parsed.data.note ?? "", req.params.id]
+      [parsed.data.status, req.user?.id, parsed.data.note ?? "", req.params.id, userId]
     );
 
     await client.query("COMMIT");

@@ -266,7 +266,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
               className="mt-2"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="Digite Admin ou seu e-mail"
+              placeholder="Digite seu usuário ou e-mail"
               autoComplete="username"
               required
             />
@@ -388,6 +388,7 @@ function UsersPanel({ token }: { token: string }) {
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [reviewingRegistrationId, setReviewingRegistrationId] = useState<string | null>(null);
+  const [reviewingResetId, setReviewingResetId] = useState<string | null>(null);
 
   async function reviewRegistration(id: string, status: "approved" | "rejected") {
     setMessage("");
@@ -409,12 +410,28 @@ function UsersPanel({ token }: { token: string }) {
   }
 
   async function reviewReset(id: string, status: "resolved" | "rejected") {
-    await request(`/admin/password-reset-requests/${id}`, token, {
-      method: "PATCH",
-      body: JSON.stringify({ status, newPassword: resetPasswords[id] })
-    });
-    setMessage(status === "resolved" ? "Senha redefinida." : "Solicitação recusada.");
-    resets.reload();
+    setMessage("");
+    setErrorMessage("");
+    const newPassword = resetPasswords[id] ?? "";
+    if (status === "resolved" && !/^(?=.*[^A-Za-z0-9]).{6,8}$/.test(newPassword)) {
+      setErrorMessage("A nova senha precisa ter de 6 a 8 caracteres e pelo menos um caractere especial.");
+      return;
+    }
+
+    setReviewingResetId(id);
+    try {
+      await request(`/admin/password-reset-requests/${id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ status, newPassword })
+      });
+      setMessage(status === "resolved" ? "Senha redefinida. O aluno já pode acessar com a nova senha." : "Solicitação recusada.");
+      setResetPasswords(({ [id]: _removed, ...rest }) => rest);
+      resets.reload();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Não foi possível revisar a recuperação de senha.");
+    } finally {
+      setReviewingResetId(null);
+    }
   }
 
   return (
@@ -455,11 +472,13 @@ function UsersPanel({ token }: { token: string }) {
                 <Input
                   type="password"
                   placeholder="Nova senha: 6 a 8 com especial"
+                  minLength={6}
+                  maxLength={8}
                   value={resetPasswords[item.id] ?? ""}
                   onChange={(event) => setResetPasswords({ ...resetPasswords, [item.id]: event.target.value })}
                 />
-                <Button onClick={() => reviewReset(item.id, "resolved")}>Redefinir</Button>
-                <Button variant="danger" onClick={() => reviewReset(item.id, "rejected")}>Recusar</Button>
+                <Button disabled={reviewingResetId === item.id} onClick={() => reviewReset(item.id, "resolved")}>Redefinir</Button>
+                <Button disabled={reviewingResetId === item.id} variant="danger" onClick={() => reviewReset(item.id, "rejected")}>Recusar</Button>
               </div>
             </div>
           ))}
