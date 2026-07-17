@@ -89,10 +89,21 @@ CREATE TABLE IF NOT EXISTS membership_plans (
   due_day INTEGER NOT NULL DEFAULT 10 CHECK (due_day BETWEEN 1 AND 28),
   billing_cycle TEXT NOT NULL DEFAULT 'monthly' CHECK (billing_cycle IN ('monthly')),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+  checkin_start_time TIME NOT NULL DEFAULT '20:30',
+  checkin_end_time TIME NOT NULL DEFAULT '22:30',
+  checkin_days INTEGER[] NOT NULL DEFAULT ARRAY[1,2,3,4,5],
   description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE membership_plans ADD COLUMN IF NOT EXISTS checkin_start_time TIME NOT NULL DEFAULT '20:30';
+ALTER TABLE membership_plans ADD COLUMN IF NOT EXISTS checkin_end_time TIME NOT NULL DEFAULT '22:30';
+ALTER TABLE membership_plans ADD COLUMN IF NOT EXISTS checkin_days INTEGER[] NOT NULL DEFAULT ARRAY[1,2,3,4,5];
+UPDATE membership_plans
+SET checkin_start_time = COALESCE(checkin_start_time, '20:30'::time),
+    checkin_end_time = COALESCE(checkin_end_time, '22:30'::time),
+    checkin_days = CASE WHEN checkin_days IS NULL OR cardinality(checkin_days) = 0 THEN ARRAY[1,2,3,4,5] ELSE checkin_days END;
 
 INSERT INTO membership_plans (name, audience, monthly_value, due_day, billing_cycle, status, description)
 VALUES
@@ -167,6 +178,8 @@ CREATE TABLE IF NOT EXISTS classes (
   class_date TIMESTAMPTZ NOT NULL,
   checkin_start_at TIMESTAMPTZ,
   checkin_end_at TIMESTAMPTZ,
+  auto_plan_id UUID REFERENCES membership_plans(id) ON DELETE SET NULL,
+  auto_class_date DATE,
   teacher_id UUID REFERENCES teachers(id) ON DELETE SET NULL,
   focus TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -174,10 +187,13 @@ CREATE TABLE IF NOT EXISTS classes (
 
 ALTER TABLE classes ADD COLUMN IF NOT EXISTS checkin_start_at TIMESTAMPTZ;
 ALTER TABLE classes ADD COLUMN IF NOT EXISTS checkin_end_at TIMESTAMPTZ;
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS auto_plan_id UUID REFERENCES membership_plans(id) ON DELETE SET NULL;
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS auto_class_date DATE;
 UPDATE classes SET checkin_start_at = COALESCE(checkin_start_at, class_date);
 UPDATE classes SET checkin_end_at = COALESCE(checkin_end_at, class_date + INTERVAL '2 hours');
 ALTER TABLE classes ALTER COLUMN checkin_start_at SET DEFAULT now();
 ALTER TABLE classes ALTER COLUMN checkin_end_at SET DEFAULT now() + INTERVAL '2 hours';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_classes_auto_plan_date ON classes(auto_plan_id, auto_class_date) WHERE auto_plan_id IS NOT NULL AND auto_class_date IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS class_allowed_plans (
   class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,

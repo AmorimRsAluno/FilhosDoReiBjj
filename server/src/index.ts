@@ -101,13 +101,10 @@ const studentPayloadSchema = z.object({
   goals: z.string().optional(),
   status: z.string().default("active")
 });
-const classPayloadSchema = z.object({
-  title: z.string().min(3),
-  focus: nullableText,
-  classDate: z.string().min(10),
-  checkinStart: z.string().min(10),
-  checkinEnd: z.string().min(10),
-  planIds: z.array(z.string().uuid()).default([])
+const planScheduleSchema = z.object({
+  checkinStartTime: z.string().regex(/^\d{2}:\d{2}$/),
+  checkinEndTime: z.string().regex(/^\d{2}:\d{2}$/),
+  checkinDays: z.array(z.coerce.number().int().min(0).max(6)).min(1)
 });
 
 app.get("/api/health", (_req, res) => {
@@ -521,7 +518,11 @@ app.get(
 
 app.get("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]), async (_req, res) => {
   const result = await query(
-    `SELECT id, name, audience, monthly_value, due_day, billing_cycle, status, description, created_at, updated_at
+    `SELECT id, name, audience, monthly_value, due_day, billing_cycle, status,
+      to_char(checkin_start_time, 'HH24:MI') AS checkin_start_time,
+      to_char(checkin_end_time, 'HH24:MI') AS checkin_end_time,
+      checkin_days,
+      description, created_at, updated_at
      FROM membership_plans
      ORDER BY status, monthly_value, name`
   );
@@ -573,6 +574,34 @@ app.put("/api/plans/:id", requireAuth, requireRole(["admin", "teacher", "finance
   );
 
   if (!result.rows[0]) return res.status(404).json({ message: "Plano não encontrado." });
+  res.json(result.rows[0]);
+});
+
+app.patch("/api/plans/:id/checkin-schedule", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  const parsed = planScheduleSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Horario de check-in invalido." });
+
+  if (parsed.data.checkinEndTime <= parsed.data.checkinStartTime) {
+    return res.status(400).json({ message: "O fim do check-in precisa ser depois do inicio." });
+  }
+
+  const uniqueDays = Array.from(new Set(parsed.data.checkinDays)).sort((a, b) => a - b);
+  const result = await query(
+    `UPDATE membership_plans
+     SET checkin_start_time = $1::time,
+         checkin_end_time = $2::time,
+         checkin_days = $3::integer[],
+         updated_at = now()
+     WHERE id = $4
+     RETURNING id, name, audience, monthly_value, due_day, billing_cycle, status,
+       to_char(checkin_start_time, 'HH24:MI') AS checkin_start_time,
+       to_char(checkin_end_time, 'HH24:MI') AS checkin_end_time,
+       checkin_days,
+       description, created_at, updated_at`,
+    [parsed.data.checkinStartTime, parsed.data.checkinEndTime, uniqueDays, req.params.id]
+  );
+
+  if (!result.rows[0]) return res.status(404).json({ message: "Plano nao encontrado." });
   res.json(result.rows[0]);
 });
 
@@ -814,27 +843,23 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
       [student.id]
     ),
     query(
-      `SELECT c.id, c.title, c.class_date, c.focus, c.checkin_start_at, c.checkin_end_at,
-        (now() BETWEEN c.checkin_start_at AND c.checkin_end_at) AS checkin_open,
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT mp.name), NULL) AS plan_names
-       FROM classes c
-       LEFT JOIN class_allowed_plans cap_list ON cap_list.class_id = c.id
-       LEFT JOIN membership_plans mp ON mp.id = cap_list.plan_id
-       WHERE (c.class_date::date = CURRENT_DATE OR c.class_date >= now())
-         AND (
-           NOT EXISTS (SELECT 1 FROM class_allowed_plans cap WHERE cap.class_id = c.id)
-           OR EXISTS (
-             SELECT 1 FROM class_allowed_plans cap
-             WHERE cap.class_id = c.id AND cap.plan_id = $2
-           )
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM attendance a WHERE a.class_id = c.id AND a.student_id = $1
-         )
-       GROUP BY c.id
-       ORDER BY CASE WHEN c.class_date::date = CURRENT_DATE THEN 0 ELSE 1 END, c.checkin_start_at ASC
+      `SELECT
+        CONCAT('schedule-', mp.id::text) AS id,
+        CONCAT('Aula ', mp.name) AS title,
+        (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_start_time) AT TIME ZONE 'America/Sao_Paulo') AS class_date,
+        'Check-in automatico do plano' AS focus,
+        (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_start_time) AT TIME ZONE 'America/Sao_Paulo') AS checkin_start_at,
+        (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_end_time) AT TIME ZONE 'America/Sao_Paulo') AS checkin_end_at,
+        (
+          EXTRACT(DOW FROM now() AT TIME ZONE 'America/Sao_Paulo')::int = ANY(mp.checkin_days)
+          AND (now() AT TIME ZONE 'America/Sao_Paulo')::time BETWEEN mp.checkin_start_time AND mp.checkin_end_time
+        ) AS checkin_open,
+        ARRAY[mp.name] AS plan_names
+       FROM membership_plans mp
+       WHERE mp.id = $1 AND mp.status = 'active'
+         AND EXTRACT(DOW FROM now() AT TIME ZONE 'America/Sao_Paulo')::int = ANY(mp.checkin_days)
        LIMIT 1`,
-      [student.id, student.plan_id]
+      [student.plan_id]
     ),
     query(
       "SELECT reference_month, due_date, value, status, pix_code FROM payments WHERE student_id = $1 ORDER BY due_date DESC LIMIT 1",
@@ -862,7 +887,8 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
        FROM training_checkins tc
        JOIN classes c ON c.id = tc.class_id
        WHERE tc.student_id = $1
-       ORDER BY CASE WHEN tc.status = 'pending' THEN 0 ELSE 1 END, tc.requested_at DESC
+         AND c.auto_class_date = (now() AT TIME ZONE 'America/Sao_Paulo')::date
+       ORDER BY tc.requested_at DESC
        LIMIT 1`,
       [student.id]
     )
@@ -905,7 +931,115 @@ app.patch("/api/student/photo", requireAuth, requireRole(["student"]), async (re
   res.json(result.rows[0]);
 });
 
-app.post("/api/student/checkins", requireAuth, async (req, res) => {
+app.post("/api/student/checkins", requireAuth, async (req, res, next) => {
+  const studentId = await resolveStudentId(req.user?.id, req.body.studentId);
+  if (!studentId) return res.status(404).json({ message: "Aluno nao encontrado." });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const scheduleResult = await client.query<{
+      student_id: string;
+      plan_id: string;
+      plan_name: string;
+      local_date: string;
+      class_date: Date;
+      checkin_start_at: Date;
+      checkin_end_at: Date;
+    }>(
+      `SELECT s.id AS student_id, mp.id AS plan_id, mp.name AS plan_name,
+        (now() AT TIME ZONE 'America/Sao_Paulo')::date AS local_date,
+        (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_start_time) AT TIME ZONE 'America/Sao_Paulo') AS class_date,
+        (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_start_time) AT TIME ZONE 'America/Sao_Paulo') AS checkin_start_at,
+        (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_end_time) AT TIME ZONE 'America/Sao_Paulo') AS checkin_end_at
+       FROM students s
+       JOIN membership_plans mp ON mp.id = s.plan_id
+       WHERE s.id = $1
+         AND mp.status = 'active'
+         AND EXTRACT(DOW FROM now() AT TIME ZONE 'America/Sao_Paulo')::int = ANY(mp.checkin_days)
+         AND (now() AT TIME ZONE 'America/Sao_Paulo')::time BETWEEN mp.checkin_start_time AND mp.checkin_end_time
+       LIMIT 1`,
+      [studentId]
+    );
+
+    const schedule = scheduleResult.rows[0];
+    if (!schedule) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Check-in indisponivel para o horario ou plano atual." });
+    }
+
+    const classResult = await client.query(
+      `INSERT INTO classes (title, focus, class_date, checkin_start_at, checkin_end_at, auto_plan_id, auto_class_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (auto_plan_id, auto_class_date) WHERE auto_plan_id IS NOT NULL AND auto_class_date IS NOT NULL
+       DO UPDATE SET checkin_start_at = EXCLUDED.checkin_start_at,
+                     checkin_end_at = EXCLUDED.checkin_end_at,
+                     title = EXCLUDED.title,
+                     focus = EXCLUDED.focus
+       RETURNING id, title, class_date, focus, checkin_start_at, checkin_end_at`,
+      [
+        `Aula ${schedule.plan_name}`,
+        "Check-in automatico do plano",
+        schedule.class_date,
+        schedule.checkin_start_at,
+        schedule.checkin_end_at,
+        schedule.plan_id,
+        schedule.local_date
+      ]
+    );
+    const classItem = classResult.rows[0];
+
+    await client.query("INSERT INTO class_allowed_plans (class_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
+      classItem.id,
+      schedule.plan_id
+    ]);
+
+    const attendance = await client.query(
+      `INSERT INTO attendance (class_id, student_id, check_in_at, xp_awarded)
+       VALUES ($1, $2, now(), 50)
+       ON CONFLICT (class_id, student_id) DO NOTHING
+       RETURNING *`,
+      [classItem.id, studentId]
+    );
+
+    const xpAwarded = attendance.rowCount ? 50 : 0;
+    if (attendance.rowCount) {
+      await client.query(
+        `UPDATE students
+         SET xp = xp + 50,
+             level = LEAST(100, GREATEST(1, ((xp + 50) / 500) + 1)),
+             classes_until_next_stripe = GREATEST(0, classes_until_next_stripe - 1)
+         WHERE id = $1`,
+        [studentId]
+      );
+      await client.query("INSERT INTO xp_history (student_id, points, reason) VALUES ($1, 50, 'Check-in automatico do plano')", [
+        studentId
+      ]);
+    }
+
+    const checkin = await client.query(
+      `INSERT INTO training_checkins (class_id, student_id, status, reviewed_at, xp_awarded)
+       VALUES ($1, $2, 'approved', now(), $3)
+       ON CONFLICT (class_id, student_id)
+       DO UPDATE SET status = 'approved',
+                     reviewed_at = COALESCE(training_checkins.reviewed_at, now()),
+                     xp_awarded = GREATEST(training_checkins.xp_awarded, EXCLUDED.xp_awarded)
+       RETURNING *`,
+      [classItem.id, studentId, xpAwarded]
+    );
+
+    await client.query("COMMIT");
+    return res.status(201).json({ ...checkin.rows[0], class: classItem, xp_awarded: Math.max(checkin.rows[0].xp_awarded, xpAwarded) });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/student/checkins-legacy", requireAuth, async (req, res) => {
   const studentId = await resolveStudentId(req.user?.id, req.body.studentId);
   if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
 
@@ -1428,13 +1562,17 @@ app.get("/api/classes", requireAuth, async (_req, res) => {
   res.json(result.rows.map((row) => ({ ...row, attendees: Number(row.attendees) })));
 });
 
-app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
-  const parsed = classPayloadSchema.safeParse(req.body);
+app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (_req, res) => {
+  return res.status(410).json({ message: "As aulas para check-in sao geradas automaticamente pela grade do plano." });
+  /*
+
+  const parsedData = classPayloadSchema.parse(req.body);
+  const parsed = { success: true };
   if (!parsed.success) return res.status(400).json({ message: "Dados da aula inválidos." });
 
-  const classDate = new Date(parsed.data.classDate);
-  const checkinStart = new Date(parsed.data.checkinStart);
-  const checkinEnd = new Date(parsed.data.checkinEnd);
+  const classDate = new Date(parsedData.classDate);
+  const checkinStart = new Date(parsedData.checkinStart);
+  const checkinEnd = new Date(parsedData.checkinEnd);
   if (Number.isNaN(classDate.getTime()) || Number.isNaN(checkinStart.getTime()) || Number.isNaN(checkinEnd.getTime())) {
     return res.status(400).json({ message: "Data da aula inválida." });
   }
@@ -1452,8 +1590,8 @@ app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, title, class_date, focus, checkin_start_at, checkin_end_at, NULL::text AS teacher_name, 0::int AS attendees`,
       [
-        parsed.data.title,
-        parsed.data.focus ?? "",
+        parsedData.title,
+        parsedData.focus ?? "",
         classDate.toISOString(),
         checkinStart.toISOString(),
         checkinEnd.toISOString(),
@@ -1461,7 +1599,7 @@ app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (
       ]
     );
 
-    for (const planId of parsed.data.planIds) {
+    for (const planId of parsedData.planIds) {
       await client.query("INSERT INTO class_allowed_plans (class_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
         result.rows[0].id,
         planId
@@ -1469,13 +1607,14 @@ app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (
     }
 
     await client.query("COMMIT");
-    res.status(201).json({ ...result.rows[0], plan_ids: parsed.data.planIds, plan_names: [] });
+    res.status(201).json({ ...result.rows[0], plan_ids: parsedData.planIds, plan_names: [] });
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
   }
+  */
 });
 
 app.get("/api/checkin-requests", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {

@@ -40,7 +40,6 @@ import {
   type AdminDashboard,
   type AdminUser,
   type CheckinRequest,
-  type ClassItem,
   type Competition,
   type FinanceEntry,
   type FinanceSummary,
@@ -943,6 +942,8 @@ function PlansPanel({ token }: { token: string }) {
               <div className="grid gap-2 text-sm text-zinc-300 sm:grid-cols-2">
                 <span>Mensalidade recorrente</span>
                 <span>Vencimento padrão: dia {plan.due_day}</span>
+                <span>Check-in: {plan.checkin_start_time} às {plan.checkin_end_time}</span>
+                <span>Dias: {formatWeekDays(plan.checkin_days)}</span>
               </div>
               {plan.description && <p className="text-sm text-royal-muted">{plan.description}</p>}
               <div className="flex justify-end">
@@ -1196,7 +1197,7 @@ function StudentDashboardView({ token }: { token: string }) {
   if (error) return <ErrorBox message={error} />;
   if (!data) return null;
 
-  const activeCheckin = data.checkin?.class_id === data.nextClass?.id ? data.checkin : null;
+  const activeCheckin = data.checkin;
   const studentName = data.student.full_name || "Aluno";
   const firstName = studentName.split(" ")[0] || "aluno";
   const safeStripes = normalizeStripeCount(data.student.stripe_count);
@@ -1222,9 +1223,9 @@ function StudentDashboardView({ token }: { token: string }) {
     try {
       await request("/student/checkins", token, {
         method: "POST",
-        body: JSON.stringify({ classId: data.nextClass.id })
+        body: JSON.stringify({})
       });
-      setCheckinMessage("Check-in enviado ao professor para validação.");
+      setCheckinMessage("Check-in registrado automaticamente.");
       reload();
     } catch (err) {
       setCheckinMessage(err instanceof Error ? err.message : "Não foi possível enviar o check-in.");
@@ -1298,7 +1299,7 @@ function StudentDashboardView({ token }: { token: string }) {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-lg font-bold text-white">Check-in de treino</h3>
-              {activeCheckin?.status === "pending" && <Badge tone="gold">Aguardando professor</Badge>}
+              {activeCheckin?.status === "pending" && <Badge tone="gold">Registrando</Badge>}
               {activeCheckin?.status === "approved" && <Badge tone="green">Treino validado</Badge>}
               {activeCheckin?.status === "rejected" && <Badge tone="red">Revisar com professor</Badge>}
             </div>
@@ -1321,12 +1322,12 @@ function StudentDashboardView({ token }: { token: string }) {
               </div>
             )}
             {activeCheckin?.status === "pending" && (
-              <p className="mt-3 text-sm text-royal-muted">Sua solicitação foi enviada. A presença só vale depois da confirmação do professor.</p>
+              <p className="mt-3 text-sm text-royal-muted">Seu check-in está sendo processado automaticamente.</p>
             )}
             {checkinMessage && <p className="mt-3 text-sm text-royal-gold">{checkinMessage}</p>}
           </div>
           <Button
-            disabled={!data.nextClass || !checkinOpen || checkinLoading || activeCheckin?.status === "pending" || activeCheckin?.status === "approved"}
+            disabled={!data.nextClass || !checkinOpen || checkinLoading || activeCheckin?.status === "approved"}
             onClick={requestCheckin}
           >
             <Clock size={16} /> {checkinLoading ? "Enviando..." : "Fazer check-in"}
@@ -1659,273 +1660,151 @@ function BusinessFinancePanel({ token }: { token: string }) {
 }
 
 function AttendancePanel({ token }: { token: string }) {
-  const classes = useApi<ClassItem[]>("/classes", token);
-  const students = useApi<Student[]>("/students", token);
-  const checkins = useApi<CheckinRequest[]>("/checkin-requests?status=pending", token);
-  const checkinReport = useApi<CheckinRequest[]>("/checkin-requests?status=all", token);
   const plans = useApi<MembershipPlan[]>("/plans", token);
-  const [classId, setClassId] = useState("");
-  const [studentId, setStudentId] = useState("");
+  const checkinReport = useApi<CheckinRequest[]>("/checkin-requests?status=all", token);
+  const [drafts, setDrafts] = useState<Record<string, { checkinStartTime: string; checkinEndTime: string; checkinDays: number[] }>>({});
+  const [savingPlanId, setSavingPlanId] = useState("");
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [savingAttendance, setSavingAttendance] = useState(false);
-  const [savingClass, setSavingClass] = useState(false);
-  const initialClassDate = dateTimeLocalValue();
-  const [classForm, setClassForm] = useState({
-    title: "",
-    focus: "",
-    classDate: initialClassDate,
-    checkinStart: initialClassDate,
-    checkinEnd: dateTimeLocalValue(addHours(new Date(), 2)),
-    planIds: [] as string[]
-  });
+  const weekDays = [
+    { value: 1, label: "Seg" },
+    { value: 2, label: "Ter" },
+    { value: 3, label: "Qua" },
+    { value: 4, label: "Qui" },
+    { value: 5, label: "Sex" },
+    { value: 6, label: "Sab" },
+    { value: 0, label: "Dom" }
+  ];
 
   useEffect(() => {
-    if (classes.data?.[0] && !classId) setClassId(classes.data[0].id);
-    if (students.data?.[0] && !studentId) setStudentId(students.data[0].id);
-  }, [classes.data, students.data, classId, studentId]);
-
-  async function registerAttendance(event: React.FormEvent) {
-    event.preventDefault();
-    setMessage("");
-    setErrorMessage("");
-    if (!classId || !studentId) {
-      setErrorMessage("Selecione a aula e o aluno antes de registrar a presença.");
-      return;
-    }
-
-    setSavingAttendance(true);
-    try {
-      const result = await request<{ registered: boolean }>("/attendance", token, {
-        method: "POST",
-        body: JSON.stringify({ classId, studentId })
-      });
-      setMessage(result.registered ? "Presença registrada e +50 XP aplicado." : "Presença já estava registrada.");
-      classes.reload();
-      students.reload();
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Não foi possível registrar a presença.");
-    } finally {
-      setSavingAttendance(false);
-    }
-  }
-
-  async function createClass(event: React.FormEvent) {
-    event.preventDefault();
-    setMessage("");
-    setErrorMessage("");
-    setSavingClass(true);
-    try {
-      const classDate = new Date(classForm.classDate);
-      const checkinStart = new Date(classForm.checkinStart);
-      const checkinEnd = new Date(classForm.checkinEnd);
-      if (Number.isNaN(classDate.getTime()) || Number.isNaN(checkinStart.getTime()) || Number.isNaN(checkinEnd.getTime())) {
-        throw new Error("Informe data e horários válidos para a aula.");
+    if (!plans.data) return;
+    const planList = plans.data;
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const plan of planList) {
+        if (!next[plan.id]) {
+          next[plan.id] = {
+            checkinStartTime: plan.checkin_start_time || "20:30",
+            checkinEndTime: plan.checkin_end_time || "22:30",
+            checkinDays: plan.checkin_days?.length ? plan.checkin_days : [1, 2, 3, 4, 5]
+          };
+        }
       }
-      if (checkinEnd <= checkinStart) {
-        throw new Error("O fim do check-in precisa ser depois do início.");
-      }
-      const created = await request<ClassItem>("/classes", token, {
-        method: "POST",
-        body: JSON.stringify({
-          ...classForm,
-          classDate: classDate.toISOString(),
-          checkinStart: checkinStart.toISOString(),
-          checkinEnd: checkinEnd.toISOString()
-        })
-      });
-      setMessage("Aula criada. Os alunos já podem solicitar check-in para ela.");
-      setClassId(created.id);
-      const nextClassDate = dateTimeLocalValue();
-      setClassForm({
-        title: "",
-        focus: "",
-        classDate: nextClassDate,
-        checkinStart: nextClassDate,
-        checkinEnd: dateTimeLocalValue(addHours(new Date(), 2)),
-        planIds: []
-      });
-      classes.reload();
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "Não foi possível criar a aula.");
-    } finally {
-      setSavingClass(false);
-    }
-  }
-
-  async function reviewCheckin(id: string, status: "approved" | "rejected") {
-    const result = await request<{ xp_awarded: number }>(`/checkin-requests/${id}`, token, {
-      method: "PATCH",
-      body: JSON.stringify({ status })
+      return next;
     });
-    setMessage(
-      status === "approved"
-        ? `Check-in confirmado. +${result.xp_awarded} XP aplicado ao aluno.`
-        : "Check-in recusado."
-    );
-    checkins.reload();
-    checkinReport.reload();
-    classes.reload();
+  }, [plans.data]);
+
+  async function saveSchedule(plan: MembershipPlan) {
+    const draft = drafts[plan.id];
+    if (!draft) return;
+    setMessage("");
+    setErrorMessage("");
+    setSavingPlanId(plan.id);
+    try {
+      await request(`/plans/${plan.id}/checkin-schedule`, token, {
+        method: "PATCH",
+        body: JSON.stringify(draft)
+      });
+      setMessage(`Horário de check-in atualizado para ${plan.name}.`);
+      plans.reload();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Não foi possível salvar o horário do plano.");
+    } finally {
+      setSavingPlanId("");
+    }
+  }
+
+  function updateDraft(planId: string, patch: Partial<{ checkinStartTime: string; checkinEndTime: string; checkinDays: number[] }>) {
+    setDrafts((current) => ({
+      ...current,
+      [planId]: {
+        checkinStartTime: current[planId]?.checkinStartTime ?? "20:30",
+        checkinEndTime: current[planId]?.checkinEndTime ?? "22:30",
+        checkinDays: current[planId]?.checkinDays ?? [1, 2, 3, 4, 5],
+        ...patch
+      }
+    }));
   }
 
   return (
     <div className="space-y-5">
-      <PageTitle title="Aulas" subtitle="Horários por plano, janela de check-in e conferência de presença" />
-      <Card>
-        <form className="grid gap-3 lg:grid-cols-4 lg:items-end" onSubmit={createClass}>
-          <Field label="Nova aula" hint="Ex.: Jiu-Jitsu Avançado">
-            <Input
-              placeholder="Nome da aula"
-              value={classForm.title}
-              onChange={(e) => setClassForm({ ...classForm, title: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Data da aula" hint="Dia e horário principal do treino">
-            <Input
-              type="datetime-local"
-              value={classForm.classDate}
-              onChange={(e) => {
-                const nextDate = e.target.value;
-                const parsedDate = new Date(nextDate);
-                setClassForm({
-                  ...classForm,
-                  classDate: nextDate,
-                  checkinStart: nextDate,
-                  checkinEnd: Number.isNaN(parsedDate.getTime()) ? classForm.checkinEnd : dateTimeLocalValue(addHours(parsedDate, 2))
-                });
-              }}
-              required
-            />
-          </Field>
-          <Field label="Check-in começa" hint="Ex.: 20:30">
-            <Input
-              type="datetime-local"
-              value={classForm.checkinStart}
-              onChange={(e) => setClassForm({ ...classForm, checkinStart: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Check-in termina" hint="Ex.: 22:30">
-            <Input
-              type="datetime-local"
-              value={classForm.checkinEnd}
-              onChange={(e) => setClassForm({ ...classForm, checkinEnd: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Foco do treino" hint="Ex.: Guarda fechada, passagem, quedas" className="lg:col-span-2">
-            <Input
-              placeholder="Objetivo técnico da aula"
-              value={classForm.focus}
-              onChange={(e) => setClassForm({ ...classForm, focus: e.target.value })}
-            />
-          </Field>
-          <div className="lg:col-span-2">
-            <p className="mb-1.5 text-xs font-bold uppercase tracking-[0.12em] text-royal-gold/85">Planos liberados</p>
-            <div className="grid gap-2 rounded-lg border border-royal-line bg-black/30 p-3 sm:grid-cols-2">
-              {plans.loading && <p className="text-sm text-royal-muted">Carregando planos...</p>}
-              {!plans.loading && plans.data?.length === 0 && <p className="text-sm text-royal-muted">Nenhum plano cadastrado. Sem seleção, todos os planos ficam liberados.</p>}
-              {plans.data?.map((plan) => (
-                <CheckboxField
-                  key={plan.id}
-                  label={plan.name}
-                  hint={formatMoney(plan.monthly_value)}
-                  checked={classForm.planIds.includes(plan.id)}
-                  onChange={(e) => {
-                    const planIds = e.target.checked
-                      ? [...classForm.planIds, plan.id]
-                      : classForm.planIds.filter((id) => id !== plan.id);
-                    setClassForm({ ...classForm, planIds });
-                  }}
-                />
-              ))}
-            </div>
-            <p className="mt-2 text-xs text-royal-muted">Se nenhum plano for marcado, todos os alunos poderão solicitar check-in na janela definida.</p>
-          </div>
-          <Button className="lg:col-span-4" disabled={savingClass || !classForm.title || !classForm.classDate || !classForm.checkinStart || !classForm.checkinEnd}>
-            <Plus size={16} /> {savingClass ? "Criando..." : "Criar aula com janela de check-in"}
-          </Button>
-        </form>
-      </Card>
+      <PageTitle title="Aulas" subtitle="Horários automáticos de check-in por plano e histórico de presença" />
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-bold text-white">Check-ins aguardando confirmação</h3>
-            <p className="mt-1 text-sm text-royal-muted">Solicitações enviadas pelos alunos para validação do treino.</p>
+            <h3 className="text-lg font-bold text-white">Grade automática por plano</h3>
+            <p className="mt-1 text-sm text-royal-muted">
+              O aluno faz check-in dentro do horário do próprio plano. A presença e o XP são registrados automaticamente.
+            </p>
           </div>
-          <Badge tone="gold">{checkins.data?.length ?? 0} pendentes</Badge>
+          <Badge tone="gold">Sem criação manual de aulas</Badge>
         </div>
-        <div className="mt-4 grid gap-3">
-          {checkins.loading && <p className="text-sm text-royal-muted">Carregando solicitações...</p>}
-          {!checkins.loading && checkins.data?.length === 0 && <EmptyState>Nenhum check-in pendente.</EmptyState>}
-          {checkins.data?.map((item) => (
-            <div key={item.id} className="grid gap-3 rounded-lg border border-royal-line bg-black/25 p-3 md:grid-cols-[auto_1fr_auto] md:items-center">
-              <Avatar src={item.photo_url} name={item.full_name} />
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-bold text-white">{item.full_name}</p>
-                  <Badge tone="gold">{item.belt}</Badge>
-                  <Badge>{item.plan_name ?? "Sem plano"}</Badge>
+        {plans.loading && <p className="mt-4 text-sm text-royal-muted">Carregando planos...</p>}
+        {plans.error && <ErrorBox message={plans.error} />}
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {plans.data?.map((plan) => {
+            const draft = drafts[plan.id] ?? {
+              checkinStartTime: plan.checkin_start_time || "20:30",
+              checkinEndTime: plan.checkin_end_time || "22:30",
+              checkinDays: plan.checkin_days?.length ? plan.checkin_days : [1, 2, 3, 4, 5]
+            };
+
+            return (
+              <Card key={plan.id} className="grid gap-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-bold text-white">{plan.name}</h3>
+                    <p className="mt-1 text-sm text-royal-muted">{plan.audience} · {formatMoney(plan.monthly_value)}</p>
+                  </div>
+                  <Badge tone={plan.status === "active" ? "green" : "neutral"}>{plan.status === "active" ? "Ativo" : "Inativo"}</Badge>
                 </div>
-                <p className="mt-1 text-sm text-royal-muted">
-                  {item.title} · {formatDateTime(item.class_date)} · solicitado {formatDateTime(item.requested_at)}
-                </p>
-                <p className="mt-1 text-xs text-royal-muted">
-                  Janela: {item.checkin_start_at ? formatDateTime(item.checkin_start_at) : "-"} até {item.checkin_end_at ? formatDateTime(item.checkin_end_at) : "-"}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => reviewCheckin(item.id, "approved")}>
-                  <CheckCircle2 size={16} /> Confirmar +50 XP
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Check-in começa">
+                    <Input type="time" value={draft.checkinStartTime} onChange={(e) => updateDraft(plan.id, { checkinStartTime: e.target.value })} />
+                  </Field>
+                  <Field label="Check-in termina">
+                    <Input type="time" value={draft.checkinEndTime} onChange={(e) => updateDraft(plan.id, { checkinEndTime: e.target.value })} />
+                  </Field>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-royal-gold/85">Dias liberados</p>
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    {weekDays.map((day) => (
+                      <CheckboxField
+                        key={day.value}
+                        label={day.label}
+                        checked={draft.checkinDays.includes(day.value)}
+                        onChange={(e) => {
+                          const checkinDays = e.target.checked
+                            ? [...draft.checkinDays, day.value]
+                            : draft.checkinDays.filter((value) => value !== day.value);
+                          updateDraft(plan.id, { checkinDays });
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <Button disabled={savingPlanId === plan.id || draft.checkinDays.length === 0} onClick={() => saveSchedule(plan)}>
+                  <Save size={16} /> {savingPlanId === plan.id ? "Salvando..." : "Salvar horário do plano"}
                 </Button>
-                <Button variant="danger" onClick={() => reviewCheckin(item.id, "rejected")}>
-                  Recusar
-                </Button>
-              </div>
-            </div>
-          ))}
+              </Card>
+            );
+          })}
         </div>
-      </Card>
-      <Card>
-        <form className="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_auto] lg:items-end" onSubmit={registerAttendance}>
-          <Field label="Aula" hint={classes.loading ? "Carregando aulas..." : "Escolha a aula que recebeu a presença"}>
-            <Select value={classId} onChange={(e) => setClassId(e.target.value)} disabled={classes.loading || !classes.data?.length}>
-              <option value="">Selecione uma aula</option>
-              {classes.data?.map((item) => (
-                <option value={item.id} key={item.id}>
-                  {item.title} - {formatDateTime(item.class_date)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Aluno" hint={students.loading ? "Carregando alunos..." : "Escolha quem participou do treino"}>
-            <Select value={studentId} onChange={(e) => setStudentId(e.target.value)} disabled={students.loading || !students.data?.length}>
-              <option value="">Selecione um aluno</option>
-              {students.data?.map((student) => (
-                <option value={student.id} key={student.id}>
-                  {student.full_name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Button disabled={savingAttendance || !classId || !studentId}>
-            <ClipboardCheck size={16} /> {savingAttendance ? "Registrando..." : "Registrar"}
-          </Button>
-        </form>
         {errorMessage && <ErrorBox message={errorMessage} />}
         {message && <p className="mt-3 text-sm text-royal-gold">{message}</p>}
       </Card>
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-bold text-white">Relatório de check-ins</h3>
-            <p className="mt-1 text-sm text-royal-muted">Histórico recente para o professor conferir solicitações reais e possíveis tentativas indevidas.</p>
+            <h3 className="text-lg font-bold text-white">Histórico de check-ins</h3>
+            <p className="mt-1 text-sm text-royal-muted">Controle para o professor conferir presença, plano, horário solicitado e XP aplicado.</p>
           </div>
           <Badge tone="gold">{checkinReport.data?.length ?? 0} registros</Badge>
         </div>
         <div className="mt-4 grid gap-3">
-          {checkinReport.loading && <p className="text-sm text-royal-muted">Carregando relatório...</p>}
+          {checkinReport.loading && <p className="text-sm text-royal-muted">Carregando histórico...</p>}
+          {checkinReport.error && <ErrorBox message={checkinReport.error} />}
           {!checkinReport.loading && checkinReport.data?.length === 0 && <EmptyState>Nenhum check-in registrado ainda.</EmptyState>}
           {checkinReport.data?.map((item) => (
             <div key={item.id} className="grid gap-3 rounded-lg border border-royal-line bg-black/25 p-3 lg:grid-cols-[1fr_auto] lg:items-center">
@@ -1936,39 +1815,17 @@ function AttendancePanel({ token }: { token: string }) {
                   <Badge>{item.plan_name ?? "Sem plano"}</Badge>
                 </div>
                 <p className="mt-1 text-sm text-royal-muted">
-                  {item.title} · aula {formatDateTime(item.class_date)} · solicitado {formatDateTime(item.requested_at)}
+                  {item.title} · aula {formatDateTime(item.class_date)} · check-in {formatDateTime(item.requested_at)}
                 </p>
                 <p className="mt-1 text-xs text-royal-muted">
-                  Janela permitida: {item.checkin_start_at ? formatDateTime(item.checkin_start_at) : "-"} até {item.checkin_end_at ? formatDateTime(item.checkin_end_at) : "-"}
+                  Janela do plano: {item.checkin_start_at ? formatDateTime(item.checkin_start_at) : "-"} até {item.checkin_end_at ? formatDateTime(item.checkin_end_at) : "-"}
                 </p>
               </div>
-              <p className="text-sm font-semibold text-royal-gold">
-                {item.reviewed_at ? `Revisado em ${formatDateTime(item.reviewed_at)}` : "Aguardando revisão"}
-              </p>
+              <p className="text-sm font-semibold text-royal-gold">+{item.xp_awarded} XP</p>
             </div>
           ))}
         </div>
       </Card>
-      <div className="grid gap-3">
-        {classes.data?.map((item) => (
-          <Card key={item.id}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="font-bold text-white">{item.title}</h3>
-                <p className="mt-1 text-sm text-royal-muted">{formatDateTime(item.class_date)} · {item.teacher_name || "Professor"}</p>
-                <p className="mt-1 text-xs text-royal-muted">
-                  Check-in: {formatDateTime(item.checkin_start_at)} até {formatDateTime(item.checkin_end_at)}
-                </p>
-                <p className="mt-1 text-xs text-royal-muted">
-                  Planos: {item.plan_names?.length ? item.plan_names.join(", ") : "Todos os planos"}
-                </p>
-              </div>
-              <Badge tone="gold">{item.attendees} presenças</Badge>
-            </div>
-            <p className="mt-3 text-sm text-zinc-300">{item.focus}</p>
-          </Card>
-        ))}
-      </div>
     </div>
   );
 }
@@ -2745,15 +2602,6 @@ function currentMonthValue() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function dateTimeLocalValue(date = new Date()) {
-  const offset = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
-}
-
-function addHours(date: Date, hours: number) {
-  return new Date(date.getTime() + hours * 60 * 60 * 1000);
-}
-
 function shiftMonthValue(value: string, amount: number) {
   const [year, month] = value.split("-").map(Number);
   const date = new Date(year, month - 1 + amount, 1);
@@ -2763,6 +2611,20 @@ function shiftMonthValue(value: string, amount: number) {
 function formatMonthValue(value: string) {
   const [year, month] = value.split("-").map(Number);
   return new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(year, month - 1, 1));
+}
+
+function formatWeekDays(days?: number[]) {
+  if (!days?.length) return "Sem dias definidos";
+  const labels: Record<number, string> = {
+    0: "Dom",
+    1: "Seg",
+    2: "Ter",
+    3: "Qua",
+    4: "Qui",
+    5: "Sex",
+    6: "Sab"
+  };
+  return [...days].sort((a, b) => a - b).map((day) => labels[day] ?? String(day)).join(", ");
 }
 
 function Loading({ title }: { title: string }) {

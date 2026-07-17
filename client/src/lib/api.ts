@@ -88,6 +88,9 @@ export type MembershipPlan = {
   due_day: number;
   billing_cycle: "monthly";
   status: "active" | "inactive";
+  checkin_start_time: string;
+  checkin_end_time: string;
+  checkin_days: number[];
   description: string | null;
   created_at: string;
   updated_at: string;
