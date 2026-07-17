@@ -1,4 +1,5 @@
 import {
+  ArrowRight,
   Award,
   BookOpen,
   CalendarCheck,
@@ -8,20 +9,30 @@ import {
   Clock,
   CreditCard,
   Download,
+  Eye,
+  EyeOff,
   FileSpreadsheet,
   FileText,
   Home,
+  KeyRound,
+  LockKeyhole,
   LogOut,
+  Mail,
   Medal,
   MessageCircle,
+  Moon,
   Pencil,
+  Phone,
   Plus,
   Save,
   Shield,
   ShoppingBag,
+  Sparkles,
+  Sun,
   Trash2,
   Trophy,
   UserPlus,
+  UserRound,
   Users
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -144,6 +155,8 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [mode, setMode] = useState<"login" | "register" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [message, setMessage] = useState("");
@@ -151,6 +164,13 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
   const [loading, setLoading] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(() => window.matchMedia?.("(display-mode: standalone)").matches ?? false);
+  const [quoteIndex, setQuoteIndex] = useState(0);
+  const [now, setNow] = useState(() => new Date());
+  const [cardTransform, setCardTransform] = useState("perspective(900px) rotateX(0deg) rotateY(0deg)");
+  const activeQuote = motivationalQuotes[quoteIndex % motivationalQuotes.length];
+  const greeting = getGreeting(now);
+  const currentTime = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(now);
+  const currentDate = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(now);
 
   useEffect(() => {
     function handleBeforeInstallPrompt(event: Event) {
@@ -168,6 +188,18 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
       window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
+
+  useEffect(() => {
+    const quoteTimer = window.setInterval(() => {
+      setQuoteIndex((current) => (current + 1) % motivationalQuotes.length);
+    }, 9000);
+    const clockTimer = window.setInterval(() => setNow(new Date()), 60000);
+
+    return () => {
+      window.clearInterval(quoteTimer);
+      window.clearInterval(clockTimer);
     };
   }, []);
 
@@ -238,93 +270,231 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
     setInstallPrompt(null);
   }
 
+  function switchMode(nextMode: "login" | "register" | "reset") {
+    setMode(nextMode);
+    setError("");
+    setMessage("");
+  }
+
+  function handleCardMove(event: React.MouseEvent<HTMLElement>) {
+    if (window.matchMedia("(max-width: 760px), (pointer: coarse), (prefers-reduced-motion: reduce)").matches) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = (event.clientX - bounds.left) / bounds.width - 0.5;
+    const y = (event.clientY - bounds.top) / bounds.height - 0.5;
+    setCardTransform(`perspective(900px) rotateX(${(-y).toFixed(2)}deg) rotateY(${x.toFixed(2)}deg)`);
+  }
+
+  function handleCardLeave() {
+    setCardTransform("perspective(900px) rotateX(0deg) rotateY(0deg)");
+  }
+
   return (
-    <main className="login-screen grid min-h-screen place-items-center px-4 py-8">
-      <Card className="login-card w-full max-w-[420px] border-royal-gold/20 p-6 sm:p-8">
-        <div className="mb-8 text-center">
-          <button className="login-logo-button mx-auto" type="button" aria-label="Logo Filhos do Rei BJJ">
-            <img
-              src="/logo-filhos-do-rei.png"
-              className="login-logo-spin logo-glow rounded-full border-2 border-royal-gold object-cover"
-              alt="Filhos do Rei BJJ William Lago"
-            />
+    <main className="login-screen premium-login-screen" data-belt-theme="black">
+      <div className="login-topline">
+        <div className="login-greeting">
+          {greeting.icon}
+          <span>{greeting.text}</span>
+        </div>
+        <div className="login-clock">
+          <strong>{currentTime}</strong>
+          <span>{currentDate}</span>
+        </div>
+      </div>
+
+      <section
+        className="premium-login-card"
+        aria-label="Acesso Filhos do Rei BJJ"
+        onMouseMove={handleCardMove}
+        onMouseLeave={handleCardLeave}
+        style={{ transform: cardTransform }}
+      >
+        <div className="login-card-shine" aria-hidden="true" />
+        <header className="login-identity">
+          <button className="login-logo-button" type="button" aria-label="Logo Filhos do Rei BJJ">
+            <img src="/logo-filhos-do-rei.png" className="academy-logo" alt="Filhos do Rei BJJ William Lago" />
           </button>
-          <h1 className="mt-6 text-xl font-black tracking-wide text-white">FILHOS DO REI BJJ</h1>
-          <p className="mt-1 text-sm font-bold tracking-[0.14em] text-royal-gold">WILLIAM LAGO</p>
+          <h1 className="login-title">FILHOS DO REI BJJ</h1>
+          <p className="login-subtitle">BRAZILIAN JIU-JITSU ACADEMY</p>
+          <p className="login-quote" key={activeQuote}>
+            {renderMotivationalQuote(activeQuote)}
+          </p>
           {installPrompt && !installed && (
-            <button type="button" className="pwa-install-button mx-auto mt-5" onClick={installApp}>
+            <button type="button" className="pwa-install-button" onClick={installApp}>
               <Download size={16} />
               Instalar aplicativo
             </button>
           )}
+        </header>
+
+        <div className="login-feedback-region" aria-live="polite">
+          {message && <p className="login-feedback login-feedback-success">{message}</p>}
+          {error && <p className="login-feedback login-feedback-error">{error}</p>}
         </div>
+
         {mode === "login" && (
-        <form className="space-y-4" onSubmit={submit}>
-          <label className="block text-sm font-semibold text-zinc-200">
-            Usuário ou e-mail
-            <Input
-              className="mt-2"
+          <form className="login-form" onSubmit={submit}>
+            <PremiumInput
+              label="Usuário ou e-mail"
+              icon={<UserRound size={19} />}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="Digite seu usuário ou e-mail"
               autoComplete="username"
+              name="username"
               required
             />
-          </label>
-          <label className="block text-sm font-semibold text-zinc-200">
-            Senha
-            <Input
-              className="mt-2"
-              type="password"
+            <PremiumInput
+              label="Senha"
+              icon={<LockKeyhole size={19} />}
+              type={showPassword ? "text" : "password"}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Digite sua senha"
               autoComplete="current-password"
+              name="password"
               required
+              trailing={
+                <button
+                  type="button"
+                  className="password-toggle"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              }
             />
-          </label>
-          {message && <p className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-3 text-sm text-emerald-200">{message}</p>}
-          {error && <p className="rounded-lg border border-royal-red/40 bg-royal-red/10 p-3 text-sm text-red-200">{error}</p>}
-          <Button className="w-full" disabled={loading}>
-            {loading ? "Entrando..." : "Entrar"}
-          </Button>
-        </form>
+            <div className="login-options">
+              <label className="remember-option">
+                <input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} />
+                <span>Lembrar-me</span>
+              </label>
+              <button type="button" className="login-text-link" onClick={() => switchMode("reset")}>
+                Esqueceu sua senha?
+              </button>
+            </div>
+            <button className="login-submit-button" disabled={loading} aria-busy={loading}>
+              <span>{loading ? "Entrando..." : "Entrar"}</span>
+              {loading ? <span className="login-spinner" aria-hidden="true" /> : <ArrowRight size={18} />}
+            </button>
+          </form>
         )}
+
         {mode === "register" && (
-          <form className="space-y-4" onSubmit={submitRegister}>
-            <Input placeholder="Nome completo" value={fullName} onChange={(event) => setFullName(event.target.value)} required />
-            <Input type="email" placeholder="E-mail" value={email} onChange={(event) => setEmail(event.target.value)} required />
-            <Input placeholder="Telefone com DDD" value={phone} onChange={(event) => setPhone(event.target.value)} required />
-            <Input
+          <form className="login-form" onSubmit={submitRegister}>
+            <PremiumInput label="Nome completo" icon={<UserRound size={19} />} placeholder="Nome completo" value={fullName} onChange={(event) => setFullName(event.target.value)} required />
+            <PremiumInput label="E-mail" icon={<Mail size={19} />} type="email" placeholder="E-mail" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+            <PremiumInput label="Telefone" icon={<Phone size={19} />} placeholder="Telefone com DDD" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" required />
+            <PremiumInput
+              label="Senha"
+              icon={<LockKeyhole size={19} />}
               type="password"
               placeholder="Senha: 6 a 8 caracteres com especial"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              autoComplete="new-password"
               required
             />
-            {error && <p className="rounded-lg border border-royal-red/40 bg-royal-red/10 p-3 text-sm text-red-200">{error}</p>}
-            <Button className="w-full" disabled={loading}>
-              {loading ? "Enviando..." : "Enviar cadastro"}
-            </Button>
+            <button className="login-submit-button" disabled={loading} aria-busy={loading}>
+              <span>{loading ? "Enviando..." : "Enviar cadastro"}</span>
+              {loading ? <span className="login-spinner" aria-hidden="true" /> : <ArrowRight size={18} />}
+            </button>
           </form>
         )}
+
         {mode === "reset" && (
-          <form className="space-y-4" onSubmit={submitReset}>
-            <Input type="email" placeholder="E-mail cadastrado" value={email} onChange={(event) => setEmail(event.target.value)} />
-            <Input placeholder="Telefone com DDD" value={phone} onChange={(event) => setPhone(event.target.value)} />
-            {error && <p className="rounded-lg border border-royal-red/40 bg-royal-red/10 p-3 text-sm text-red-200">{error}</p>}
-            <Button className="w-full" disabled={loading}>
-              {loading ? "Enviando..." : "Solicitar nova senha"}
-            </Button>
+          <form className="login-form" onSubmit={submitReset}>
+            <PremiumInput label="E-mail cadastrado" icon={<Mail size={19} />} type="email" placeholder="E-mail cadastrado" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
+            <PremiumInput label="Telefone" icon={<Phone size={19} />} placeholder="Telefone com DDD" value={phone} onChange={(event) => setPhone(event.target.value)} autoComplete="tel" />
+            <button className="login-submit-button" disabled={loading} aria-busy={loading}>
+              <span>{loading ? "Enviando..." : "Solicitar nova senha"}</span>
+              {loading ? <span className="login-spinner" aria-hidden="true" /> : <KeyRound size={18} />}
+            </button>
           </form>
         )}
-        <div className="mt-4 grid gap-2 text-center text-sm font-semibold text-royal-gold">
-          {mode !== "login" && <button onClick={() => setMode("login")}>Voltar ao login</button>}
-          {mode !== "register" && <button onClick={() => setMode("register")}>Cadastrar aluno</button>}
-          {mode !== "reset" && <button onClick={() => setMode("reset")}>Recuperar senha</button>}
+
+        <div className="login-divider" aria-hidden="true">
+          <span>OU</span>
         </div>
-      </Card>
+        <div className="login-actions">
+          {mode !== "login" && (
+            <button type="button" onClick={() => switchMode("login")}>
+              <ArrowRight size={15} /> Voltar ao login
+            </button>
+          )}
+          {mode !== "register" && (
+            <button type="button" onClick={() => switchMode("register")}>
+              <UserPlus size={15} /> Cadastrar aluno
+            </button>
+          )}
+          {mode !== "reset" && mode !== "login" && (
+            <button type="button" onClick={() => switchMode("reset")}>
+              <KeyRound size={15} /> Recuperar senha
+            </button>
+          )}
+        </div>
+      </section>
+
+      <footer className="login-footer">
+        <span>Versão 0.1.0</span>
+        <p>
+          Forje <strong>campeões</strong>. Forme <strong>caráter</strong>.
+        </p>
+      </footer>
     </main>
+  );
+}
+
+const motivationalQuotes = [
+  "A disciplina vence o talento.",
+  "Forje campeões. Forme caráter.",
+  "A evolução começa quando a desculpa termina.",
+  "Respeito, disciplina e constância.",
+  "Todo faixa-preta já foi um faixa-branca."
+];
+
+function getGreeting(date: Date) {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 12) return { text: "Bom dia, guerreiro.", icon: <Sun size={16} /> };
+  if (hour >= 12 && hour < 18) return { text: "Boa tarde, guerreiro.", icon: <Sparkles size={16} /> };
+  return { text: "Boa noite, guerreiro.", icon: <Moon size={16} /> };
+}
+
+function renderMotivationalQuote(text: string) {
+  const highlight = ["disciplina", "campeões", "caráter", "evolução", "Respeito", "faixa-preta"].find((word) => text.includes(word));
+  if (!highlight) return text;
+  const [before, after] = text.split(highlight);
+  return (
+    <>
+      {before}
+      <span>{highlight}</span>
+      {after}
+    </>
+  );
+}
+
+function PremiumInput({
+  label,
+  icon,
+  trailing,
+  className = "",
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & {
+  label: string;
+  icon: React.ReactNode;
+  trailing?: React.ReactNode;
+}) {
+  return (
+    <label className="premium-field">
+      <span className="premium-field-label">{label}</span>
+      <span className="premium-input-wrapper">
+        <span className="premium-input-icon" aria-hidden="true">
+          {icon}
+        </span>
+        <Input className={`premium-input ${trailing ? "premium-input-with-action" : ""} ${className}`} {...props} />
+        {trailing}
+      </span>
+    </label>
   );
 }
 
