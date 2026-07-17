@@ -101,6 +101,11 @@ const studentPayloadSchema = z.object({
   goals: z.string().optional(),
   status: z.string().default("active")
 });
+const classPayloadSchema = z.object({
+  title: z.string().min(3),
+  focus: nullableText,
+  classDate: z.string().min(10)
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: "Filhos do Rei BJJ API" });
@@ -807,11 +812,11 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
     query(
       `SELECT id, title, class_date, focus
        FROM classes c
-       WHERE c.class_date >= now()
+       WHERE (c.class_date::date = CURRENT_DATE OR c.class_date >= now())
          AND NOT EXISTS (
            SELECT 1 FROM attendance a WHERE a.class_id = c.id AND a.student_id = $1
          )
-       ORDER BY c.class_date ASC
+       ORDER BY CASE WHEN c.class_date::date = CURRENT_DATE THEN 0 ELSE 1 END, c.class_date ASC
        LIMIT 1`,
       [student.id]
     ),
@@ -892,7 +897,13 @@ app.post("/api/student/checkins", requireAuth, async (req, res) => {
   if (!requestedClass.success) return res.status(400).json({ message: "Aula inválida." });
 
   const classResult = requestedClass.data.classId
-    ? await query("SELECT id, title, class_date, focus FROM classes WHERE id = $1", [requestedClass.data.classId])
+    ? await query(
+        `SELECT id, title, class_date, focus
+         FROM classes
+         WHERE id = $1
+           AND (class_date::date = CURRENT_DATE OR class_date >= now())`,
+        [requestedClass.data.classId]
+      )
     : await query(
         `SELECT c.id, c.title, c.class_date, c.focus
          FROM classes c
@@ -1373,6 +1384,26 @@ app.get("/api/classes", requireAuth, async (_req, res) => {
      LIMIT 20`
   );
   res.json(result.rows.map((row) => ({ ...row, attendees: Number(row.attendees) })));
+});
+
+app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  const parsed = classPayloadSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Dados da aula inválidos." });
+
+  const classDate = new Date(parsed.data.classDate);
+  if (Number.isNaN(classDate.getTime())) {
+    return res.status(400).json({ message: "Data da aula inválida." });
+  }
+
+  const teacher = await query<{ id: string }>("SELECT id FROM teachers WHERE user_id = $1 LIMIT 1", [req.user?.id]);
+  const result = await query(
+    `INSERT INTO classes (title, focus, class_date, teacher_id)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, title, class_date, focus, NULL::text AS teacher_name, 0::int AS attendees`,
+    [parsed.data.title, parsed.data.focus ?? "", classDate.toISOString(), teacher.rows[0]?.id ?? null]
+  );
+
+  res.status(201).json(result.rows[0]);
 });
 
 app.get("/api/checkin-requests", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {

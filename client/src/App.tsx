@@ -1651,6 +1651,12 @@ function AttendancePanel({ token }: { token: string }) {
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [savingAttendance, setSavingAttendance] = useState(false);
+  const [savingClass, setSavingClass] = useState(false);
+  const [classForm, setClassForm] = useState({
+    title: "",
+    focus: "",
+    classDate: dateTimeLocalValue()
+  });
 
   useEffect(() => {
     if (classes.data?.[0] && !classId) setClassId(classes.data[0].id);
@@ -1679,6 +1685,31 @@ function AttendancePanel({ token }: { token: string }) {
       setErrorMessage(err instanceof Error ? err.message : "Não foi possível registrar a presença.");
     } finally {
       setSavingAttendance(false);
+    }
+  }
+
+  async function createClass(event: React.FormEvent) {
+    event.preventDefault();
+    setMessage("");
+    setErrorMessage("");
+    setSavingClass(true);
+    try {
+      const classDate = new Date(classForm.classDate);
+      if (Number.isNaN(classDate.getTime())) {
+        throw new Error("Informe uma data e horário válidos para a aula.");
+      }
+      const created = await request<ClassItem>("/classes", token, {
+        method: "POST",
+        body: JSON.stringify({ ...classForm, classDate: classDate.toISOString() })
+      });
+      setMessage("Aula criada. Os alunos já podem solicitar check-in para ela.");
+      setClassId(created.id);
+      setClassForm({ title: "", focus: "", classDate: dateTimeLocalValue() });
+      classes.reload();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Não foi possível criar a aula.");
+    } finally {
+      setSavingClass(false);
     }
   }
 
@@ -1733,6 +1764,36 @@ function AttendancePanel({ token }: { token: string }) {
             </div>
           ))}
         </div>
+      </Card>
+      <Card>
+        <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end" onSubmit={createClass}>
+          <Field label="Nova aula" hint="Ex.: Jiu-Jitsu Avançado">
+            <Input
+              placeholder="Nome da aula"
+              value={classForm.title}
+              onChange={(e) => setClassForm({ ...classForm, title: e.target.value })}
+              required
+            />
+          </Field>
+          <Field label="Data e horário" hint="Define quando o check-in ficará disponível">
+            <Input
+              type="datetime-local"
+              value={classForm.classDate}
+              onChange={(e) => setClassForm({ ...classForm, classDate: e.target.value })}
+              required
+            />
+          </Field>
+          <Field label="Foco do treino" hint="Ex.: Guarda fechada, passagem, quedas">
+            <Input
+              placeholder="Objetivo técnico da aula"
+              value={classForm.focus}
+              onChange={(e) => setClassForm({ ...classForm, focus: e.target.value })}
+            />
+          </Field>
+          <Button disabled={savingClass || !classForm.title || !classForm.classDate}>
+            <Plus size={16} /> {savingClass ? "Criando..." : "Criar aula"}
+          </Button>
+        </form>
       </Card>
       <Card>
         <form className="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_auto] lg:items-end" onSubmit={registerAttendance}>
@@ -2551,6 +2612,11 @@ function imageFileToProfileDataUrl(file: File) {
 function currentMonthValue() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function dateTimeLocalValue(date = new Date()) {
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
 function shiftMonthValue(value: string, amount: number) {
