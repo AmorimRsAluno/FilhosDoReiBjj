@@ -87,7 +87,7 @@ const permissionOptions = [
   ["students", "Alunos"],
   ["finance", "Financeiro"],
   ["plans", "Planos"],
-  ["attendance", "Presença"],
+  ["attendance", "Aulas"],
   ["techniques", "Técnicas"],
   ["ranking", "Ranking"],
   ["store", "Loja"],
@@ -101,7 +101,7 @@ const adminNav = [
   { key: "students", label: "Alunos", icon: Users },
   { key: "finance", label: "Financeiro", icon: CreditCard },
   { key: "plans", label: "Planos", icon: CreditCard },
-  { key: "attendance", label: "Presença", icon: ClipboardCheck },
+  { key: "attendance", label: "Aulas", icon: ClipboardCheck },
   { key: "techniques", label: "Técnicas", icon: BookOpen },
   { key: "ranking", label: "Ranking", icon: Trophy },
   { key: "store", label: "Loja", icon: ShoppingBag },
@@ -1205,9 +1205,17 @@ function StudentDashboardView({ token }: { token: string }) {
   const beltThemeKey = normalizeBeltTheme(data.student.belt);
   const techniqueTotal = data.techniqueSummary.reduce((sum, item) => sum + item.total, 0);
   const studentGoal = data.student.goals?.trim();
+  const checkinOpen = Boolean(data.nextClass?.checkin_open);
+  const checkinWindowText = data.nextClass
+    ? `Check-in liberado de ${formatDateTime(data.nextClass.checkin_start_at)} até ${formatDateTime(data.nextClass.checkin_end_at)}`
+    : "";
 
   async function requestCheckin() {
     if (!data?.nextClass) return;
+    if (!checkinOpen) {
+      setCheckinMessage("Check-in ainda não está liberado para o horário e plano desta aula.");
+      return;
+    }
 
     setCheckinLoading(true);
     setCheckinMessage("");
@@ -1299,6 +1307,14 @@ function StudentDashboardView({ token }: { token: string }) {
                 ? `${data.nextClass.title} · ${formatDateTime(data.nextClass.class_date)}`
                 : "Nenhuma aula disponível para check-in."}
             </p>
+            {data.nextClass && (
+              <p className={`mt-2 text-sm ${checkinOpen ? "text-emerald-300" : "text-royal-muted"}`}>
+                {checkinOpen ? "Check-in liberado agora." : "Check-in fora da janela liberada."} {checkinWindowText}
+              </p>
+            )}
+            {data.nextClass?.plan_names?.length ? (
+              <p className="mt-1 text-xs text-royal-muted">Planos desta aula: {data.nextClass.plan_names.join(", ")}</p>
+            ) : null}
             {activeCheckin?.status === "approved" && activeCheckin.xp_awarded > 0 && (
               <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-royal-gold/40 bg-royal-gold/10 px-4 py-3 text-royal-gold">
                 <SparkXp /> <span className="text-sm font-black">+{activeCheckin.xp_awarded} XP confirmado</span>
@@ -1310,7 +1326,7 @@ function StudentDashboardView({ token }: { token: string }) {
             {checkinMessage && <p className="mt-3 text-sm text-royal-gold">{checkinMessage}</p>}
           </div>
           <Button
-            disabled={!data.nextClass || checkinLoading || activeCheckin?.status === "pending" || activeCheckin?.status === "approved"}
+            disabled={!data.nextClass || !checkinOpen || checkinLoading || activeCheckin?.status === "pending" || activeCheckin?.status === "approved"}
             onClick={requestCheckin}
           >
             <Clock size={16} /> {checkinLoading ? "Enviando..." : "Fazer check-in"}
@@ -1646,16 +1662,22 @@ function AttendancePanel({ token }: { token: string }) {
   const classes = useApi<ClassItem[]>("/classes", token);
   const students = useApi<Student[]>("/students", token);
   const checkins = useApi<CheckinRequest[]>("/checkin-requests?status=pending", token);
+  const checkinReport = useApi<CheckinRequest[]>("/checkin-requests?status=all", token);
+  const plans = useApi<MembershipPlan[]>("/plans", token);
   const [classId, setClassId] = useState("");
   const [studentId, setStudentId] = useState("");
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [savingAttendance, setSavingAttendance] = useState(false);
   const [savingClass, setSavingClass] = useState(false);
+  const initialClassDate = dateTimeLocalValue();
   const [classForm, setClassForm] = useState({
     title: "",
     focus: "",
-    classDate: dateTimeLocalValue()
+    classDate: initialClassDate,
+    checkinStart: initialClassDate,
+    checkinEnd: dateTimeLocalValue(addHours(new Date(), 2)),
+    planIds: [] as string[]
   });
 
   useEffect(() => {
@@ -1695,16 +1717,34 @@ function AttendancePanel({ token }: { token: string }) {
     setSavingClass(true);
     try {
       const classDate = new Date(classForm.classDate);
-      if (Number.isNaN(classDate.getTime())) {
-        throw new Error("Informe uma data e horário válidos para a aula.");
+      const checkinStart = new Date(classForm.checkinStart);
+      const checkinEnd = new Date(classForm.checkinEnd);
+      if (Number.isNaN(classDate.getTime()) || Number.isNaN(checkinStart.getTime()) || Number.isNaN(checkinEnd.getTime())) {
+        throw new Error("Informe data e horários válidos para a aula.");
+      }
+      if (checkinEnd <= checkinStart) {
+        throw new Error("O fim do check-in precisa ser depois do início.");
       }
       const created = await request<ClassItem>("/classes", token, {
         method: "POST",
-        body: JSON.stringify({ ...classForm, classDate: classDate.toISOString() })
+        body: JSON.stringify({
+          ...classForm,
+          classDate: classDate.toISOString(),
+          checkinStart: checkinStart.toISOString(),
+          checkinEnd: checkinEnd.toISOString()
+        })
       });
       setMessage("Aula criada. Os alunos já podem solicitar check-in para ela.");
       setClassId(created.id);
-      setClassForm({ title: "", focus: "", classDate: dateTimeLocalValue() });
+      const nextClassDate = dateTimeLocalValue();
+      setClassForm({
+        title: "",
+        focus: "",
+        classDate: nextClassDate,
+        checkinStart: nextClassDate,
+        checkinEnd: dateTimeLocalValue(addHours(new Date(), 2)),
+        planIds: []
+      });
       classes.reload();
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Não foi possível criar a aula.");
@@ -1724,12 +1764,90 @@ function AttendancePanel({ token }: { token: string }) {
         : "Check-in recusado."
     );
     checkins.reload();
+    checkinReport.reload();
     classes.reload();
   }
 
   return (
     <div className="space-y-5">
-      <PageTitle title="Controle de treinos" subtitle="Aulas, presença e frequência mensal" />
+      <PageTitle title="Aulas" subtitle="Horários por plano, janela de check-in e conferência de presença" />
+      <Card>
+        <form className="grid gap-3 lg:grid-cols-4 lg:items-end" onSubmit={createClass}>
+          <Field label="Nova aula" hint="Ex.: Jiu-Jitsu Avançado">
+            <Input
+              placeholder="Nome da aula"
+              value={classForm.title}
+              onChange={(e) => setClassForm({ ...classForm, title: e.target.value })}
+              required
+            />
+          </Field>
+          <Field label="Data da aula" hint="Dia e horário principal do treino">
+            <Input
+              type="datetime-local"
+              value={classForm.classDate}
+              onChange={(e) => {
+                const nextDate = e.target.value;
+                const parsedDate = new Date(nextDate);
+                setClassForm({
+                  ...classForm,
+                  classDate: nextDate,
+                  checkinStart: nextDate,
+                  checkinEnd: Number.isNaN(parsedDate.getTime()) ? classForm.checkinEnd : dateTimeLocalValue(addHours(parsedDate, 2))
+                });
+              }}
+              required
+            />
+          </Field>
+          <Field label="Check-in começa" hint="Ex.: 20:30">
+            <Input
+              type="datetime-local"
+              value={classForm.checkinStart}
+              onChange={(e) => setClassForm({ ...classForm, checkinStart: e.target.value })}
+              required
+            />
+          </Field>
+          <Field label="Check-in termina" hint="Ex.: 22:30">
+            <Input
+              type="datetime-local"
+              value={classForm.checkinEnd}
+              onChange={(e) => setClassForm({ ...classForm, checkinEnd: e.target.value })}
+              required
+            />
+          </Field>
+          <Field label="Foco do treino" hint="Ex.: Guarda fechada, passagem, quedas" className="lg:col-span-2">
+            <Input
+              placeholder="Objetivo técnico da aula"
+              value={classForm.focus}
+              onChange={(e) => setClassForm({ ...classForm, focus: e.target.value })}
+            />
+          </Field>
+          <div className="lg:col-span-2">
+            <p className="mb-1.5 text-xs font-bold uppercase tracking-[0.12em] text-royal-gold/85">Planos liberados</p>
+            <div className="grid gap-2 rounded-lg border border-royal-line bg-black/30 p-3 sm:grid-cols-2">
+              {plans.loading && <p className="text-sm text-royal-muted">Carregando planos...</p>}
+              {!plans.loading && plans.data?.length === 0 && <p className="text-sm text-royal-muted">Nenhum plano cadastrado. Sem seleção, todos os planos ficam liberados.</p>}
+              {plans.data?.map((plan) => (
+                <CheckboxField
+                  key={plan.id}
+                  label={plan.name}
+                  hint={formatMoney(plan.monthly_value)}
+                  checked={classForm.planIds.includes(plan.id)}
+                  onChange={(e) => {
+                    const planIds = e.target.checked
+                      ? [...classForm.planIds, plan.id]
+                      : classForm.planIds.filter((id) => id !== plan.id);
+                    setClassForm({ ...classForm, planIds });
+                  }}
+                />
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-royal-muted">Se nenhum plano for marcado, todos os alunos poderão solicitar check-in na janela definida.</p>
+          </div>
+          <Button className="lg:col-span-4" disabled={savingClass || !classForm.title || !classForm.classDate || !classForm.checkinStart || !classForm.checkinEnd}>
+            <Plus size={16} /> {savingClass ? "Criando..." : "Criar aula com janela de check-in"}
+          </Button>
+        </form>
+      </Card>
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -1748,9 +1866,13 @@ function AttendancePanel({ token }: { token: string }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-bold text-white">{item.full_name}</p>
                   <Badge tone="gold">{item.belt}</Badge>
+                  <Badge>{item.plan_name ?? "Sem plano"}</Badge>
                 </div>
                 <p className="mt-1 text-sm text-royal-muted">
                   {item.title} · {formatDateTime(item.class_date)} · solicitado {formatDateTime(item.requested_at)}
+                </p>
+                <p className="mt-1 text-xs text-royal-muted">
+                  Janela: {item.checkin_start_at ? formatDateTime(item.checkin_start_at) : "-"} até {item.checkin_end_at ? formatDateTime(item.checkin_end_at) : "-"}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1764,36 +1886,6 @@ function AttendancePanel({ token }: { token: string }) {
             </div>
           ))}
         </div>
-      </Card>
-      <Card>
-        <form className="grid gap-3 lg:grid-cols-[1fr_1fr_1fr_auto] lg:items-end" onSubmit={createClass}>
-          <Field label="Nova aula" hint="Ex.: Jiu-Jitsu Avançado">
-            <Input
-              placeholder="Nome da aula"
-              value={classForm.title}
-              onChange={(e) => setClassForm({ ...classForm, title: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Data e horário" hint="Define quando o check-in ficará disponível">
-            <Input
-              type="datetime-local"
-              value={classForm.classDate}
-              onChange={(e) => setClassForm({ ...classForm, classDate: e.target.value })}
-              required
-            />
-          </Field>
-          <Field label="Foco do treino" hint="Ex.: Guarda fechada, passagem, quedas">
-            <Input
-              placeholder="Objetivo técnico da aula"
-              value={classForm.focus}
-              onChange={(e) => setClassForm({ ...classForm, focus: e.target.value })}
-            />
-          </Field>
-          <Button disabled={savingClass || !classForm.title || !classForm.classDate}>
-            <Plus size={16} /> {savingClass ? "Criando..." : "Criar aula"}
-          </Button>
-        </form>
       </Card>
       <Card>
         <form className="grid gap-3 lg:grid-cols-[1.2fr_1.2fr_auto] lg:items-end" onSubmit={registerAttendance}>
@@ -1824,13 +1916,52 @@ function AttendancePanel({ token }: { token: string }) {
         {errorMessage && <ErrorBox message={errorMessage} />}
         {message && <p className="mt-3 text-sm text-royal-gold">{message}</p>}
       </Card>
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-white">Relatório de check-ins</h3>
+            <p className="mt-1 text-sm text-royal-muted">Histórico recente para o professor conferir solicitações reais e possíveis tentativas indevidas.</p>
+          </div>
+          <Badge tone="gold">{checkinReport.data?.length ?? 0} registros</Badge>
+        </div>
+        <div className="mt-4 grid gap-3">
+          {checkinReport.loading && <p className="text-sm text-royal-muted">Carregando relatório...</p>}
+          {!checkinReport.loading && checkinReport.data?.length === 0 && <EmptyState>Nenhum check-in registrado ainda.</EmptyState>}
+          {checkinReport.data?.map((item) => (
+            <div key={item.id} className="grid gap-3 rounded-lg border border-royal-line bg-black/25 p-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-bold text-white">{item.full_name}</p>
+                  {checkinStatusBadge(item.status)}
+                  <Badge>{item.plan_name ?? "Sem plano"}</Badge>
+                </div>
+                <p className="mt-1 text-sm text-royal-muted">
+                  {item.title} · aula {formatDateTime(item.class_date)} · solicitado {formatDateTime(item.requested_at)}
+                </p>
+                <p className="mt-1 text-xs text-royal-muted">
+                  Janela permitida: {item.checkin_start_at ? formatDateTime(item.checkin_start_at) : "-"} até {item.checkin_end_at ? formatDateTime(item.checkin_end_at) : "-"}
+                </p>
+              </div>
+              <p className="text-sm font-semibold text-royal-gold">
+                {item.reviewed_at ? `Revisado em ${formatDateTime(item.reviewed_at)}` : "Aguardando revisão"}
+              </p>
+            </div>
+          ))}
+        </div>
+      </Card>
       <div className="grid gap-3">
         {classes.data?.map((item) => (
           <Card key={item.id}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="font-bold text-white">{item.title}</h3>
-                <p className="mt-1 text-sm text-royal-muted">{formatDateTime(item.class_date)} · {item.teacher_name}</p>
+                <p className="mt-1 text-sm text-royal-muted">{formatDateTime(item.class_date)} · {item.teacher_name || "Professor"}</p>
+                <p className="mt-1 text-xs text-royal-muted">
+                  Check-in: {formatDateTime(item.checkin_start_at)} até {formatDateTime(item.checkin_end_at)}
+                </p>
+                <p className="mt-1 text-xs text-royal-muted">
+                  Planos: {item.plan_names?.length ? item.plan_names.join(", ") : "Todos os planos"}
+                </p>
               </div>
               <Badge tone="gold">{item.attendees} presenças</Badge>
             </div>
@@ -2619,6 +2750,10 @@ function dateTimeLocalValue(date = new Date()) {
   return new Date(date.getTime() - offset).toISOString().slice(0, 16);
 }
 
+function addHours(date: Date, hours: number) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
+
 function shiftMonthValue(value: string, amount: number) {
   const [year, month] = value.split("-").map(Number);
   const date = new Date(year, month - 1 + amount, 1);
@@ -2643,6 +2778,13 @@ function statusBadge(status?: string | null) {
   if (status === "overdue") return <Badge tone="red">Atrasado</Badge>;
   if (status === "pending") return <Badge tone="gold">Pendente</Badge>;
   return <Badge>Sem mensalidade</Badge>;
+}
+
+function checkinStatusBadge(status?: string | null) {
+  if (status === "approved") return <Badge tone="green">Confirmado</Badge>;
+  if (status === "rejected") return <Badge tone="red">Recusado</Badge>;
+  if (status === "pending") return <Badge tone="gold">Pendente</Badge>;
+  return <Badge>Sem status</Badge>;
 }
 
 function techniqueBadge(status: Technique["status"]) {

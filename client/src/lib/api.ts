@@ -108,7 +108,16 @@ export type AdminDashboard = {
 export type StudentDashboard = {
   student: StudentSummary & { goals: string };
   monthlyAttendance: number;
-  nextClass: { id: string; title: string; class_date: string; focus: string } | null;
+  nextClass: {
+    id: string;
+    title: string;
+    class_date: string;
+    focus: string;
+    checkin_start_at: string;
+    checkin_end_at: string;
+    checkin_open: boolean;
+    plan_names?: string[];
+  } | null;
   payment: Payment | null;
   techniqueSummary: Array<{ status: string; total: number }>;
   rankingPosition: number;
@@ -137,10 +146,13 @@ export type CheckinRequest = {
   full_name: string;
   photo_url: string;
   belt: string;
+  plan_name?: string | null;
   class_id: string;
   title: string;
   class_date: string;
   focus: string;
+  checkin_start_at?: string;
+  checkin_end_at?: string;
 };
 
 export type Payment = {
@@ -189,8 +201,12 @@ export type ClassItem = {
   id: string;
   title: string;
   class_date: string;
+  checkin_start_at: string;
+  checkin_end_at: string;
   focus: string;
   teacher_name: string;
+  plan_ids?: string[];
+  plan_names?: string[];
   attendees: number;
 };
 

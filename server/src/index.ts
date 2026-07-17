@@ -104,7 +104,10 @@ const studentPayloadSchema = z.object({
 const classPayloadSchema = z.object({
   title: z.string().min(3),
   focus: nullableText,
-  classDate: z.string().min(10)
+  classDate: z.string().min(10),
+  checkinStart: z.string().min(10),
+  checkinEnd: z.string().min(10),
+  planIds: z.array(z.string().uuid()).default([])
 });
 
 app.get("/api/health", (_req, res) => {
@@ -794,6 +797,7 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
     photo_url: string;
     xp: number;
     level: number;
+    plan_id: string | null;
   }>("SELECT * FROM students WHERE user_id = $1 OR id = $2 LIMIT 1", [
     req.user?.id,
     req.query.studentId ?? null
@@ -810,15 +814,27 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
       [student.id]
     ),
     query(
-      `SELECT id, title, class_date, focus
+      `SELECT c.id, c.title, c.class_date, c.focus, c.checkin_start_at, c.checkin_end_at,
+        (now() BETWEEN c.checkin_start_at AND c.checkin_end_at) AS checkin_open,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT mp.name), NULL) AS plan_names
        FROM classes c
+       LEFT JOIN class_allowed_plans cap_list ON cap_list.class_id = c.id
+       LEFT JOIN membership_plans mp ON mp.id = cap_list.plan_id
        WHERE (c.class_date::date = CURRENT_DATE OR c.class_date >= now())
+         AND (
+           NOT EXISTS (SELECT 1 FROM class_allowed_plans cap WHERE cap.class_id = c.id)
+           OR EXISTS (
+             SELECT 1 FROM class_allowed_plans cap
+             WHERE cap.class_id = c.id AND cap.plan_id = $2
+           )
+         )
          AND NOT EXISTS (
            SELECT 1 FROM attendance a WHERE a.class_id = c.id AND a.student_id = $1
          )
-       ORDER BY CASE WHEN c.class_date::date = CURRENT_DATE THEN 0 ELSE 1 END, c.class_date ASC
+       GROUP BY c.id
+       ORDER BY CASE WHEN c.class_date::date = CURRENT_DATE THEN 0 ELSE 1 END, c.checkin_start_at ASC
        LIMIT 1`,
-      [student.id]
+      [student.id, student.plan_id]
     ),
     query(
       "SELECT reference_month, due_date, value, status, pix_code FROM payments WHERE student_id = $1 ORDER BY due_date DESC LIMIT 1",
@@ -898,22 +914,43 @@ app.post("/api/student/checkins", requireAuth, async (req, res) => {
 
   const classResult = requestedClass.data.classId
     ? await query(
-        `SELECT id, title, class_date, focus
-         FROM classes
-         WHERE id = $1
-           AND (class_date::date = CURRENT_DATE OR class_date >= now())`,
-        [requestedClass.data.classId]
+        `SELECT c.id, c.title, c.class_date, c.focus, c.checkin_start_at, c.checkin_end_at
+         FROM classes c
+         WHERE c.id = $1
+           AND now() BETWEEN c.checkin_start_at AND c.checkin_end_at
+           AND EXISTS (
+             SELECT 1 FROM students s
+             WHERE s.id = $2
+               AND (
+                 NOT EXISTS (SELECT 1 FROM class_allowed_plans cap WHERE cap.class_id = c.id)
+                 OR EXISTS (
+                   SELECT 1 FROM class_allowed_plans cap
+                   WHERE cap.class_id = c.id AND cap.plan_id = s.plan_id
+                 )
+               )
+           )`,
+        [requestedClass.data.classId, studentId]
       )
     : await query(
-        `SELECT c.id, c.title, c.class_date, c.focus
+        `SELECT c.id, c.title, c.class_date, c.focus, c.checkin_start_at, c.checkin_end_at
          FROM classes c
-         WHERE (c.class_date::date = CURRENT_DATE OR c.class_date >= now())
+         WHERE now() BETWEEN c.checkin_start_at AND c.checkin_end_at
+           AND EXISTS (
+             SELECT 1 FROM students s
+             WHERE s.id = $1
+               AND (
+                 NOT EXISTS (SELECT 1 FROM class_allowed_plans cap WHERE cap.class_id = c.id)
+                 OR EXISTS (
+                   SELECT 1 FROM class_allowed_plans cap
+                   WHERE cap.class_id = c.id AND cap.plan_id = s.plan_id
+                 )
+               )
+           )
            AND NOT EXISTS (
              SELECT 1 FROM attendance a WHERE a.class_id = c.id AND a.student_id = $1
            )
-         ORDER BY CASE WHEN c.class_date::date = CURRENT_DATE THEN 0 ELSE 1 END, c.class_date ASC
-         LIMIT 1`
-        ,
+         ORDER BY c.checkin_start_at ASC
+         LIMIT 1`,
         [studentId]
       );
 
@@ -1374,11 +1411,16 @@ app.delete("/api/techniques/:id", requireAuth, requireRole(["admin", "teacher"])
 
 app.get("/api/classes", requireAuth, async (_req, res) => {
   const result = await query(
-    `SELECT c.id, c.title, c.class_date, c.focus, t.name AS teacher_name,
-      COUNT(a.id) AS attendees
+    `SELECT c.id, c.title, c.class_date, c.focus, c.checkin_start_at, c.checkin_end_at,
+      t.name AS teacher_name,
+      ARRAY_REMOVE(ARRAY_AGG(DISTINCT mp.id::text), NULL) AS plan_ids,
+      ARRAY_REMOVE(ARRAY_AGG(DISTINCT mp.name), NULL) AS plan_names,
+      COUNT(DISTINCT a.id) AS attendees
      FROM classes c
      LEFT JOIN teachers t ON t.id = c.teacher_id
      LEFT JOIN attendance a ON a.class_id = c.id
+     LEFT JOIN class_allowed_plans cap ON cap.class_id = c.id
+     LEFT JOIN membership_plans mp ON mp.id = cap.plan_id
      GROUP BY c.id, t.name
      ORDER BY c.class_date DESC
      LIMIT 20`
@@ -1391,33 +1433,67 @@ app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (
   if (!parsed.success) return res.status(400).json({ message: "Dados da aula inválidos." });
 
   const classDate = new Date(parsed.data.classDate);
-  if (Number.isNaN(classDate.getTime())) {
+  const checkinStart = new Date(parsed.data.checkinStart);
+  const checkinEnd = new Date(parsed.data.checkinEnd);
+  if (Number.isNaN(classDate.getTime()) || Number.isNaN(checkinStart.getTime()) || Number.isNaN(checkinEnd.getTime())) {
     return res.status(400).json({ message: "Data da aula inválida." });
   }
 
-  const teacher = await query<{ id: string }>("SELECT id FROM teachers WHERE user_id = $1 LIMIT 1", [req.user?.id]);
-  const result = await query(
-    `INSERT INTO classes (title, focus, class_date, teacher_id)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, title, class_date, focus, NULL::text AS teacher_name, 0::int AS attendees`,
-    [parsed.data.title, parsed.data.focus ?? "", classDate.toISOString(), teacher.rows[0]?.id ?? null]
-  );
+  if (checkinEnd <= checkinStart) {
+    return res.status(400).json({ message: "O fim do check-in precisa ser depois do inicio." });
+  }
 
-  res.status(201).json(result.rows[0]);
+  const teacher = await query<{ id: string }>("SELECT id FROM teachers WHERE user_id = $1 LIMIT 1", [req.user?.id]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `INSERT INTO classes (title, focus, class_date, checkin_start_at, checkin_end_at, teacher_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, title, class_date, focus, checkin_start_at, checkin_end_at, NULL::text AS teacher_name, 0::int AS attendees`,
+      [
+        parsed.data.title,
+        parsed.data.focus ?? "",
+        classDate.toISOString(),
+        checkinStart.toISOString(),
+        checkinEnd.toISOString(),
+        teacher.rows[0]?.id ?? null
+      ]
+    );
+
+    for (const planId of parsed.data.planIds) {
+      await client.query("INSERT INTO class_allowed_plans (class_id, plan_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [
+        result.rows[0].id,
+        planId
+      ]);
+    }
+
+    await client.query("COMMIT");
+    res.status(201).json({ ...result.rows[0], plan_ids: parsed.data.planIds, plan_names: [] });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 });
 
 app.get("/api/checkin-requests", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   const status = String(req.query.status ?? "pending");
+  const statusFilter = status === "all" ? "" : "WHERE tc.status = $1";
   const result = await query(
     `SELECT tc.id, tc.status, tc.requested_at, tc.reviewed_at, tc.xp_awarded,
       s.id AS student_id, s.full_name, s.photo_url, s.belt,
-      c.id AS class_id, c.title, c.class_date, c.focus
+      mp.name AS plan_name,
+      c.id AS class_id, c.title, c.class_date, c.focus, c.checkin_start_at, c.checkin_end_at
      FROM training_checkins tc
      JOIN students s ON s.id = tc.student_id
+     LEFT JOIN membership_plans mp ON mp.id = s.plan_id
      JOIN classes c ON c.id = tc.class_id
-     WHERE tc.status = $1
-     ORDER BY tc.requested_at ASC`,
-    [status]
+     ${statusFilter}
+     ORDER BY CASE WHEN tc.status = 'pending' THEN 0 ELSE 1 END, tc.requested_at DESC
+     LIMIT 80`,
+    status === "all" ? [] : [status]
   );
 
   res.json(result.rows);

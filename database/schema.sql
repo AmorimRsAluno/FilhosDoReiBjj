@@ -165,9 +165,24 @@ CREATE TABLE IF NOT EXISTS classes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
   class_date TIMESTAMPTZ NOT NULL,
+  checkin_start_at TIMESTAMPTZ,
+  checkin_end_at TIMESTAMPTZ,
   teacher_id UUID REFERENCES teachers(id) ON DELETE SET NULL,
   focus TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS checkin_start_at TIMESTAMPTZ;
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS checkin_end_at TIMESTAMPTZ;
+UPDATE classes SET checkin_start_at = COALESCE(checkin_start_at, class_date);
+UPDATE classes SET checkin_end_at = COALESCE(checkin_end_at, class_date + INTERVAL '2 hours');
+ALTER TABLE classes ALTER COLUMN checkin_start_at SET DEFAULT now();
+ALTER TABLE classes ALTER COLUMN checkin_end_at SET DEFAULT now() + INTERVAL '2 hours';
+
+CREATE TABLE IF NOT EXISTS class_allowed_plans (
+  class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  plan_id UUID NOT NULL REFERENCES membership_plans(id) ON DELETE CASCADE,
+  PRIMARY KEY (class_id, plan_id)
 );
 
 CREATE TABLE IF NOT EXISTS attendance (
@@ -304,4 +319,5 @@ CREATE INDEX IF NOT EXISTS idx_membership_plans_status ON membership_plans(statu
 CREATE INDEX IF NOT EXISTS idx_financial_entries_date_type ON financial_entries(entry_date, type);
 CREATE INDEX IF NOT EXISTS idx_attendance_student_checkin ON attendance(student_id, check_in_at);
 CREATE INDEX IF NOT EXISTS idx_classes_date ON classes(class_date);
+CREATE INDEX IF NOT EXISTS idx_classes_checkin_window ON classes(checkin_start_at, checkin_end_at);
 CREATE INDEX IF NOT EXISTS idx_training_checkins_status ON training_checkins(status, requested_at);
