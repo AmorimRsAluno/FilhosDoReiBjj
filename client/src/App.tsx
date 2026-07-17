@@ -35,7 +35,7 @@ import {
   UserRound,
   Users
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import {
   type AdminDashboard,
   type AdminUser,
@@ -1197,6 +1197,14 @@ function StudentDashboardView({ token }: { token: string }) {
   if (!data) return null;
 
   const activeCheckin = data.checkin?.class_id === data.nextClass?.id ? data.checkin : null;
+  const studentName = data.student.full_name || "Aluno";
+  const firstName = studentName.split(" ")[0] || "aluno";
+  const safeStripes = normalizeStripeCount(data.student.stripe_count);
+  const classesLeft = safeNumber(data.student.classes_until_next_stripe);
+  const graduationLabel = formatGraduationLabel(data.student.belt, safeStripes);
+  const beltThemeKey = normalizeBeltTheme(data.student.belt);
+  const techniqueTotal = data.techniqueSummary.reduce((sum, item) => sum + item.total, 0);
+  const studentGoal = data.student.goals?.trim();
 
   async function requestCheckin() {
     if (!data?.nextClass) return;
@@ -1240,38 +1248,43 @@ function StudentDashboardView({ token }: { token: string }) {
   }
 
   return (
-    <div className="space-y-5">
-      <PageTitle title={`Olá, ${data.student.full_name.split(" ")[0]}`} subtitle="Sua evolução no tatame" />
-      <Card className="grid gap-5 md:grid-cols-[auto_1fr_auto] md:items-center">
-        <div className="space-y-2">
-          <Avatar src={data.student.photo_url} name={data.student.full_name} size="lg" />
-          <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[.03] px-3 text-xs font-semibold text-white transition hover:border-royal-gold hover:text-royal-gold">
+    <div className="student-evolution space-y-5" data-belt-theme={beltThemeKey}>
+      <PageTitle title={`Olá, ${firstName}`} subtitle="Sua evolução no tatame" />
+      <Card className="student-profile-card grid gap-5 lg:grid-cols-[auto_1fr_auto] lg:items-center">
+        <div className="profile-photo-shell">
+          <Avatar src={data.student.photo_url} name={studentName} size="lg" />
+          <label className="photo-action" aria-label="Adicionar ou trocar foto do perfil">
             <Camera size={14} />
-            {photoLoading ? "Enviando..." : "Foto"}
+            {photoLoading ? "Enviando..." : "Trocar foto"}
             <input className="hidden" type="file" accept="image/*" disabled={photoLoading} onChange={updateProfilePhoto} />
           </label>
-          {photoMessage && <p className="max-w-28 text-xs text-royal-gold">{photoMessage}</p>}
+          {photoMessage && <p className="photo-feedback" aria-live="polite">{photoMessage}</p>}
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-2xl font-black text-white">{data.student.full_name}</h2>
-            <Badge tone="gold">{data.student.belt} · {data.student.stripe_count} graus</Badge>
+            <h2 className="text-2xl font-black text-white md:text-3xl">{studentName}</h2>
+            <span className="graduation-badge">{graduationLabel}</span>
+            <Badge tone="green">Cadastro aprovado</Badge>
           </div>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-300">{data.student.goals}</p>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-300">
+            {studentGoal || "Cada treino é uma oportunidade de evolução. Combine seus próximos objetivos com o professor."}
+          </p>
+          <p className="mt-3 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-royal-gold">
+            <Shield size={14} /> Graduação acompanhada pelo aluno e definida pelo professor
+          </p>
         </div>
-        <div className="rounded-lg border border-royal-gold/30 bg-royal-gold/10 p-4 text-center">
-          <p className="text-xs uppercase tracking-wider text-royal-gold">Nível</p>
-          <p className="text-4xl font-black text-white">{data.student.level}</p>
-          <p className="text-sm text-zinc-300">{data.student.xp} XP</p>
-        </div>
-        <div className="md:col-span-3">
-          <BeltProgress
-            belt={data.student.belt}
-            stripes={data.student.stripe_count}
-            remaining={data.student.classes_until_next_stripe}
-          />
+        <div className="student-level-card" aria-label={`Nível ${data.student.level}, ${data.student.xp} XP`}>
+          <p>Nível</p>
+          <strong>{data.student.level}</strong>
+          <span>{data.student.xp} XP</span>
+          <div className="student-level-line" />
         </div>
       </Card>
+      <BeltProgress
+        belt={data.student.belt}
+        stripes={safeStripes}
+        remaining={classesLeft}
+      />
       <Card className={activeCheckin?.status === "approved" && activeCheckin.xp_awarded > 0 ? "xp-confirmed" : ""}>
         <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
           <div>
@@ -1304,11 +1317,33 @@ function StudentDashboardView({ token }: { token: string }) {
           </Button>
         </div>
       </Card>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={<CalendarCheck />} label="Treinos no mês" value={data.monthlyAttendance} />
-        <StatCard icon={<Trophy />} label="Posição geral" value={data.rankingPosition ? `#${data.rankingPosition}` : "-"} />
-        <StatCard icon={<CreditCard />} label="Mensalidade" value={paymentStatus(data.payment?.status)} danger={data.payment?.status === "overdue"} />
-        <StatCard icon={<BookOpen />} label="Técnicas" value={`${data.techniqueSummary.reduce((sum, item) => sum + item.total, 0)}`} />
+      <div className="grid gap-4 xl:grid-cols-[1.25fr_.75fr]">
+        <Card>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="section-kicker">Desenvolvimento</p>
+              <h3 className="text-lg font-black text-white">Base de evolução</h3>
+            </div>
+            <Sparkles className="text-royal-gold" size={20} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <DevelopmentSignal icon={<CalendarCheck size={18} />} title="Disciplina" text="Em desenvolvimento" />
+            <DevelopmentSignal icon={<BookOpen size={18} />} title="Técnica" text="Construindo base" />
+            <DevelopmentSignal icon={<Trophy size={18} />} title="Resistência" text="Evoluindo sempre" />
+            <DevelopmentSignal icon={<Shield size={18} />} title="Mentalidade" text="Forjando caráter" />
+          </div>
+        </Card>
+        <Card>
+          <p className="section-kicker">Próximos objetivos</p>
+          <h3 className="mt-1 text-lg font-black text-white">Definidos pelo professor</h3>
+          {studentGoal ? (
+            <div className="mt-4 rounded-lg border border-royal-gold/25 bg-royal-gold/10 p-4 text-sm leading-6 text-zinc-200">
+              {studentGoal}
+            </div>
+          ) : (
+            <EmptyState>O professor ainda não definiu objetivos para esta etapa.</EmptyState>
+          )}
+        </Card>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -1324,13 +1359,29 @@ function StudentDashboardView({ token }: { token: string }) {
           )}
         </Card>
         <Card>
-          <h3 className="text-lg font-bold text-white">Objetivo mensal</h3>
-          <div className="mt-4 h-3 rounded-full bg-black/40">
-            <div className="h-3 rounded-full bg-royal-gold" style={{ width: `${Math.min(100, (data.monthlyAttendance / 12) * 100)}%` }} />
+          <p className="section-kicker">Conquistas</p>
+          <h3 className="mt-1 text-lg font-black text-white">Histórico do atleta</h3>
+          <div className="achievement-empty mt-4">
+            <Award size={20} />
+            <span>Suas conquistas aparecerão aqui quando houver eventos reais registrados.</span>
           </div>
-          <p className="mt-3 text-sm text-zinc-300">{data.monthlyAttendance} de 12 treinos planejados no mês.</p>
         </Card>
       </div>
+      <Card>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="section-kicker">Estatísticas</p>
+            <h3 className="text-lg font-black text-white">Resumo rápido</h3>
+          </div>
+          <span className="text-xs text-royal-muted">Dados reais do sistema</span>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <EvolutionStat icon={<CalendarCheck size={18} />} label="Treinos no mês" value={data.monthlyAttendance || 0} />
+          <EvolutionStat icon={<Trophy size={18} />} label="Posição geral" value={data.rankingPosition ? `#${data.rankingPosition}` : "Sem ranking"} />
+          <EvolutionStat icon={<CreditCard size={18} />} label="Mensalidade" value={paymentStatus(data.payment?.status)} danger={data.payment?.status === "overdue"} />
+          <EvolutionStat icon={<BookOpen size={18} />} label="Técnicas" value={techniqueTotal} />
+        </div>
+      </Card>
     </div>
   );
 }
@@ -2217,7 +2268,7 @@ function PageTitle({ title, subtitle }: { title: string; subtitle: string }) {
   );
 }
 
-function StatCard({ icon, label, value, danger = false }: { icon: React.ReactNode; label: string; value: React.ReactNode; danger?: boolean }) {
+function StatCard({ icon, label, value, danger = false }: { icon: ReactNode; label: string; value: ReactNode; danger?: boolean }) {
   return (
     <Card>
       <div className={`mb-4 grid h-10 w-10 place-items-center rounded-lg ${danger ? "bg-royal-red/15 text-royal-red" : "bg-royal-gold/15 text-royal-gold"}`}>
@@ -2226,6 +2277,26 @@ function StatCard({ icon, label, value, danger = false }: { icon: React.ReactNod
       <p className="text-sm text-royal-muted">{label}</p>
       <p className="mt-1 text-2xl font-black text-white">{value}</p>
     </Card>
+  );
+}
+
+function DevelopmentSignal({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
+  return (
+    <div className="development-signal">
+      <span>{icon}</span>
+      <strong>{title}</strong>
+      <small>{text}</small>
+    </div>
+  );
+}
+
+function EvolutionStat({ icon, label, value, danger = false }: { icon: ReactNode; label: string; value: ReactNode; danger?: boolean }) {
+  return (
+    <div className={`evolution-stat ${danger ? "is-danger" : ""}`}>
+      <span>{icon}</span>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -2240,56 +2311,184 @@ function Avatar({ src, name, size = "sm" }: { src: string; name: string; size?: 
 }
 
 function BeltProgress({ belt, stripes, remaining, compact = false }: { belt: string; stripes: number; remaining: number; compact?: boolean }) {
-  const safeStripes = Math.min(4, Math.max(0, Number(stripes ?? 0)));
-  const classesLeft = Math.max(0, Number(remaining ?? 0));
-  const ready = classesLeft === 0;
+  const safeStripes = normalizeStripeCount(stripes);
+  const hasClassGoal = remaining !== null && remaining !== undefined && Number.isFinite(Number(remaining));
+  const classesLeft = hasClassGoal ? Math.max(0, Number(remaining)) : null;
+  const ready = hasClassGoal && classesLeft === 0;
   const nextStep = safeStripes >= 4 ? "próxima faixa" : "próximo grau";
   const theme = beltTheme(belt);
+  const degreeSteps = [1, 2, 3, 4];
+  const graduationLabel = formatGraduationLabel(belt, safeStripes);
+  const attendanceBadge = !hasClassGoal
+    ? "Meta ainda não definida"
+    : ready
+      ? "Pronto para avaliação"
+      : `Faltam ${classesLeft} ${classesLeft === 1 ? "aula" : "aulas"}`;
+  const quote = quoteByBelt(theme.key);
+  const beltStyle = {
+    "--belt-color-start": theme.start,
+    "--belt-color-middle": theme.middle,
+    "--belt-color-end": theme.end,
+    "--belt-text": theme.text
+  } as CSSProperties;
 
   return (
-    <div className={`belt-card rounded-lg border ${ready ? "border-emerald-400/35 bg-emerald-400/10" : "border-white/10 bg-black/25"} ${compact ? "p-3" : "p-4"}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <section
+      className={`belt-card evolution-belt-card ${compact ? "is-compact" : ""}`}
+      data-belt-theme={theme.key}
+      aria-label={`Graduação atual: ${graduationLabel}`}
+    >
+      <div className="belt-header">
         <div>
-          <p className="text-xs uppercase tracking-wider text-royal-muted">Graduação</p>
-          <p className={`${compact ? "text-sm" : "text-lg"} font-black text-white`}>
-            Faixa {belt} · {safeStripes}/4 graus
-          </p>
+          <p className="section-kicker">Sua graduação</p>
+          <h3>{graduationLabel}</h3>
+          {!compact && <small>{quote}</small>}
         </div>
-        <Badge tone={ready ? "green" : "gold"}>{ready ? "Pronto para avaliação" : `Faltam ${classesLeft} aulas`}</Badge>
+        <Badge tone={ready ? "green" : "gold"}>
+          <span className="inline-flex items-center gap-1">
+            <CalendarCheck size={13} /> {attendanceBadge}
+          </span>
+        </Badge>
       </div>
-      <div className="mt-3 flex items-center gap-3">
-        <div className="belt-bar relative h-8 flex-1 overflow-hidden rounded-sm border border-black/50" style={{ background: theme.background }}>
-          <div className="absolute inset-y-0 left-1/2 w-9 -translate-x-1/2 bg-black/20" />
-          <div className="absolute right-5 top-1/2 flex -translate-y-1/2 gap-1 rounded-sm bg-black px-2 py-1">
-            {[0, 1, 2, 3].map((stripe) => (
-              <span key={stripe} className={`h-5 w-1 rounded-sm ${stripe < safeStripes ? "bg-royal-gold" : "bg-white/20"}`} />
-            ))}
-          </div>
-        </div>
+
+      <div
+        className="jiu-belt"
+        style={beltStyle}
+        role="img"
+        title={`${graduationLabel}. ${safeStripes} de 4 graus conquistados.`}
+        aria-label={`${graduationLabel}. ${safeStripes} de 4 graus conquistados.`}
+      >
+        <span className="belt-label">Faixa {belt || "Branca"}</span>
+        <span className="belt-rank-panel" aria-hidden="true">
+          {degreeSteps.map((step) => (
+            <span key={step} className={`belt-stripe ${step <= safeStripes ? "is-earned" : ""}`} />
+          ))}
+        </span>
       </div>
+
       {!compact && (
-        <p className="mt-3 text-sm text-zinc-300">
-          O professor controla esta graduação. O aluno apenas acompanha quando faltam aulas para o {nextStep}.
-        </p>
+        <>
+          <div className="degree-roadmap" aria-label="Linha de progressão dos graus">
+            {degreeSteps.map((step) => {
+              const status = degreeStatus(step, safeStripes);
+              const label = status === "completed" ? "Concluído" : status === "current" ? "Próximo" : "Futuro";
+              const tooltip = status === "completed"
+                ? `${step}º grau conquistado`
+                : status === "current"
+                  ? hasClassGoal
+                    ? `${step}º grau. ${attendanceBadge}.`
+                    : `${step}º grau. Meta ainda não definida.`
+                  : `${step}º grau futuro`;
+
+              return (
+                <div className={`degree-step is-${status}`} key={step} title={tooltip}>
+                  <span>{step}º</span>
+                  <strong>{step}º grau</strong>
+                  <small>{label}</small>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="next-degree-card">
+            <div>
+              <p>Progresso para o {nextStep}</p>
+              <strong>{attendanceBadge}</strong>
+            </div>
+            <span>{safeStripes >= 4 ? "Próxima faixa" : `${safeStripes + 1}º grau`}</span>
+          </div>
+
+          <div className="graduation-note">
+            <LockKeyhole size={18} />
+            <p>
+              A graduação é definida pelo <strong>professor</strong>. O aluno acompanha o progresso, as aulas e os próximos objetivos.
+            </p>
+          </div>
+        </>
       )}
-    </div>
+    </section>
   );
 }
 
-function beltTheme(belt: string) {
-  const themes: Record<string, { background: string }> = {
-    branca: { background: "linear-gradient(90deg, #e5e7eb, #ffffff 45%, #d4d4d8)" },
-    cinza: { background: "linear-gradient(90deg, #52525b, #a1a1aa 45%, #3f3f46)" },
-    amarela: { background: "linear-gradient(90deg, #ca8a04, #facc15 45%, #a16207)" },
-    laranja: { background: "linear-gradient(90deg, #c2410c, #fb923c 45%, #9a3412)" },
-    verde: { background: "linear-gradient(90deg, #166534, #22c55e 45%, #14532d)" },
-    azul: { background: "linear-gradient(90deg, #1d4ed8, #60a5fa 45%, #1e3a8a)" },
-    roxa: { background: "linear-gradient(90deg, #6d28d9, #a78bfa 45%, #4c1d95)" },
-    marrom: { background: "linear-gradient(90deg, #78350f, #a16207 45%, #451a03)" },
-    preta: { background: "linear-gradient(90deg, #020617, #18181b 45%, #000000)" }
+function safeNumber(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+}
+
+function normalizeStripeCount(value: unknown) {
+  return Math.min(4, Math.max(0, Math.trunc(safeNumber(value))));
+}
+
+function formatGraduationLabel(belt: string, stripes: number) {
+  const safeBelt = belt || "Branca";
+  if (stripes <= 0) return `Faixa ${safeBelt} • Sem graus`;
+  return `Faixa ${safeBelt} • ${stripes} de 4 graus`;
+}
+
+function degreeStatus(step: number, currentStripes: number) {
+  if (step <= currentStripes) return "completed";
+  if (currentStripes < 4 && step === currentStripes + 1) return "current";
+  return "locked";
+}
+
+function normalizeBeltTheme(belt: string) {
+  const value = String(belt || "").trim().toLowerCase();
+  const map: Record<string, string> = {
+    branca: "white",
+    white: "white",
+    cinza: "gray",
+    gray: "gray",
+    grey: "gray",
+    amarela: "yellow",
+    yellow: "yellow",
+    laranja: "orange",
+    orange: "orange",
+    verde: "green",
+    green: "green",
+    azul: "blue",
+    blue: "blue",
+    roxa: "purple",
+    purple: "purple",
+    marrom: "brown",
+    brown: "brown",
+    preta: "black",
+    black: "black"
   };
 
-  return themes[belt.toLowerCase()] ?? themes.branca;
+  return map[value] ?? "white";
+}
+
+function quoteByBelt(theme: string) {
+  const quotes: Record<string, string> = {
+    white: "Todo faixa-preta começou aqui.",
+    gray: "A base é construída com constância.",
+    yellow: "Disciplina transforma treino em evolução.",
+    orange: "Continue evoluindo, treino após treino.",
+    green: "A técnica começa a ganhar identidade.",
+    blue: "Constância transforma técnica em confiança.",
+    purple: "Refine os detalhes.",
+    brown: "A excelência está nos pequenos ajustes.",
+    black: "A faixa muda. O aprendizado continua."
+  };
+
+  return quotes[theme] ?? "A disciplina vence o talento.";
+}
+
+function beltTheme(belt: string) {
+  const key = normalizeBeltTheme(belt);
+  const themes: Record<string, { key: string; start: string; middle: string; end: string; text: string }> = {
+    white: { key, start: "#ffffff", middle: "#eeeeee", end: "#cfcfcf", text: "#111111" },
+    gray: { key, start: "#9ca3af", middle: "#6b7280", end: "#3f3f46", text: "#ffffff" },
+    yellow: { key, start: "#ffe26a", middle: "#facc15", end: "#b77908", text: "#111111" },
+    orange: { key, start: "#fb923c", middle: "#ea580c", end: "#9a3412", text: "#ffffff" },
+    green: { key, start: "#4ade80", middle: "#16a34a", end: "#14532d", text: "#ffffff" },
+    blue: { key, start: "#2e75ff", middle: "#1958c7", end: "#123d8f", text: "#ffffff" },
+    purple: { key, start: "#9a5cff", middle: "#7336c9", end: "#4f228d", text: "#ffffff" },
+    brown: { key, start: "#9a643d", middle: "#754728", end: "#4f2d18", text: "#ffffff" },
+    black: { key, start: "#202020", middle: "#0e0e0e", end: "#050505", text: "#ffffff" }
+  };
+
+  return themes[key] ?? themes.white;
 }
 
 function imageFileToProfileDataUrl(file: File) {

@@ -30,6 +30,26 @@
   --belt-accent-soft: rgba(244, 244, 244, 0.15);
 }
 
+[data-belt-theme="gray"] {
+  --belt-accent: #9ca3af;
+  --belt-accent-soft: rgba(156, 163, 175, 0.16);
+}
+
+[data-belt-theme="yellow"] {
+  --belt-accent: #facc15;
+  --belt-accent-soft: rgba(250, 204, 21, 0.16);
+}
+
+[data-belt-theme="orange"] {
+  --belt-accent: #fb923c;
+  --belt-accent-soft: rgba(251, 146, 60, 0.16);
+}
+
+[data-belt-theme="green"] {
+  --belt-accent: #22c55e;
+  --belt-accent-soft: rgba(34, 197, 94, 0.16);
+}
+
 [data-belt-theme="blue"] {
   --belt-accent: #2675ff;
   --belt-accent-soft: rgba(38, 117, 255, 0.16);
@@ -784,7 +804,10 @@ input[type="date"] {
 @media (prefers-reduced-motion: reduce) {
   .premium-login-screen *,
   .premium-login-screen *::before,
-  .premium-login-screen *::after {
+  .premium-login-screen *::after,
+  .student-evolution *,
+  .student-evolution *::before,
+  .student-evolution *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
@@ -825,11 +848,148 @@ input[type="date"] {
   }
 }
 
+.student-profile-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255, 197, 27, 0.16);
+}
+
+.student-profile-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background:
+    radial-gradient(circle at 12% 18%, var(--belt-accent-soft), transparent 18rem),
+    linear-gradient(135deg, rgba(255, 197, 27, 0.08), transparent 42%);
+  pointer-events: none;
+}
+
+.student-profile-card > * {
+  position: relative;
+}
+
+.profile-photo-shell {
+  display: grid;
+  justify-items: center;
+  gap: 0.65rem;
+}
+
+.profile-photo-shell img {
+  width: clamp(7rem, 18vw, 8.75rem);
+  height: clamp(7rem, 18vw, 8.75rem);
+  border: 1px solid rgba(255, 197, 27, 0.62);
+  border-radius: 1.15rem;
+  box-shadow:
+    0 0 0 4px rgba(255, 197, 27, 0.08),
+    0 0 34px var(--belt-accent-soft);
+}
+
+.photo-action {
+  display: inline-flex;
+  min-height: 2.25rem;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+  padding: 0 0.8rem;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  transition:
+    border-color 200ms ease,
+    color 200ms ease,
+    transform 200ms ease;
+}
+
+.photo-action:hover,
+.photo-action:focus-within {
+  border-color: rgba(255, 197, 27, 0.62);
+  color: var(--gold-primary);
+  transform: translateY(-1px);
+}
+
+.photo-feedback {
+  max-width: 8.75rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--gold-primary);
+}
+
+.graduation-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 197, 27, 0.38);
+  background:
+    linear-gradient(135deg, rgba(255, 197, 27, 0.16), rgba(255, 255, 255, 0.045)),
+    var(--belt-accent-soft);
+  padding: 0.35rem 0.7rem;
+  color: #fff7d1;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.student-level-card {
+  min-width: min(100%, 11rem);
+  border-radius: 0.95rem;
+  border: 1px solid rgba(255, 197, 27, 0.42);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 197, 27, 0.2), transparent 70%),
+    rgba(0, 0, 0, 0.42);
+  padding: 1rem;
+  text-align: center;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.22);
+}
+
+.student-level-card p {
+  color: var(--gold-primary);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.student-level-card strong {
+  display: block;
+  color: #fff;
+  font-size: 2.75rem;
+  line-height: 1;
+}
+
+.student-level-card span {
+  display: block;
+  margin-top: 0.35rem;
+  color: #d7d7d7;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.student-level-line {
+  margin-top: 0.8rem;
+  height: 0.22rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold-primary), var(--belt-accent));
+  opacity: 0.88;
+}
+
+.section-kicker {
+  color: var(--gold-primary);
+  font-size: 0.72rem;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
 .belt-card {
   transition:
-    border-color 180ms ease,
-    transform 180ms ease,
-    background 180ms ease;
+    border-color 220ms ease,
+    transform 220ms ease,
+    background 220ms ease,
+    box-shadow 220ms ease;
 }
 
 .belt-card:hover {
@@ -837,16 +997,404 @@ input[type="date"] {
   transform: translateY(-1px);
 }
 
-.belt-bar {
-  box-shadow:
-    inset 0 8px 12px rgba(255, 255, 255, 0.12),
-    inset 0 -10px 14px rgba(0, 0, 0, 0.32),
-    0 12px 20px rgba(0, 0, 0, 0.28);
-  transition: transform 180ms ease;
+.evolution-belt-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.75rem;
+  background:
+    radial-gradient(circle at 18% 0%, var(--belt-accent-soft), transparent 18rem),
+    linear-gradient(145deg, rgba(25, 25, 25, 0.98), rgba(7, 7, 7, 0.96));
+  padding: 1.25rem;
+  box-shadow: 0 20px 42px rgba(0, 0, 0, 0.24);
 }
 
-.belt-card:hover .belt-bar {
-  transform: scaleX(1.012);
+.belt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.belt-header h3 {
+  margin-top: 0.2rem;
+  color: #fff;
+  font-size: clamp(1.25rem, 2vw, 1.75rem);
+  font-weight: 950;
+}
+
+.belt-header small {
+  display: block;
+  margin-top: 0.3rem;
+  color: #cfcfcf;
+  font-size: 0.9rem;
+}
+
+.jiu-belt {
+  position: relative;
+  display: flex;
+  min-height: clamp(4.25rem, 10vw, 5.8rem);
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(0, 0, 0, 0.72);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.32), transparent 25%, rgba(0, 0, 0, 0.22) 76%, rgba(0, 0, 0, 0.48)),
+    linear-gradient(90deg, var(--belt-color-start), var(--belt-color-middle) 52%, var(--belt-color-end));
+  box-shadow:
+    inset 0 10px 14px rgba(255, 255, 255, 0.16),
+    inset 0 -14px 18px rgba(0, 0, 0, 0.34),
+    0 18px 32px rgba(0, 0, 0, 0.34),
+    0 0 28px var(--belt-accent-soft);
+  transition:
+    box-shadow 260ms ease,
+    transform 260ms ease,
+    filter 260ms ease;
+}
+
+.jiu-belt::before,
+.jiu-belt::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.jiu-belt::before {
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 28px);
+  opacity: 0.18;
+}
+
+.jiu-belt::after {
+  right: clamp(4.9rem, 13vw, 7rem);
+  left: auto;
+  width: 0.7rem;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.belt-card:hover .jiu-belt {
+  filter: brightness(1.06);
+  transform: translateY(-2px);
+}
+
+.belt-label {
+  position: relative;
+  z-index: 1;
+  padding-left: clamp(1rem, 4vw, 2rem);
+  color: var(--belt-text);
+  font-size: clamp(1rem, 3vw, 1.45rem);
+  font-weight: 950;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.26);
+}
+
+.belt-rank-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: clamp(5.5rem, 16vw, 7.5rem);
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  gap: 0.36rem;
+  border-left: 0.42rem solid rgba(255, 255, 255, 0.78);
+  background: #050505;
+  padding: 0 1rem;
+  box-shadow: inset 10px 0 18px rgba(255, 255, 255, 0.06);
+}
+
+.belt-stripe {
+  width: 0.32rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.belt-stripe.is-earned {
+  background: #f4f4f4;
+  box-shadow:
+    0 0 14px rgba(255, 255, 255, 0.24),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.14);
+}
+
+.degree-roadmap {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+
+.degree-step {
+  position: relative;
+  min-height: 5.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.28);
+  padding: 0.85rem;
+  color: #a1a1aa;
+  transition:
+    border-color 220ms ease,
+    transform 220ms ease,
+    background 220ms ease;
+}
+
+.degree-step:hover {
+  transform: translateY(-1px);
+}
+
+.degree-step > span {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.78rem;
+  font-weight: 950;
+}
+
+.degree-step strong,
+.degree-step small {
+  display: block;
+}
+
+.degree-step strong {
+  margin-top: 0.65rem;
+  color: #fff;
+  font-size: 0.88rem;
+}
+
+.degree-step small {
+  margin-top: 0.15rem;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.degree-step.is-completed {
+  border-color: rgba(255, 197, 27, 0.34);
+  background: rgba(255, 197, 27, 0.09);
+  color: var(--gold-primary);
+}
+
+.degree-step.is-current {
+  border-color: rgba(255, 197, 27, 0.58);
+  background:
+    radial-gradient(circle at 15% 18%, rgba(255, 197, 27, 0.22), transparent 58%),
+    rgba(255, 197, 27, 0.08);
+  color: var(--gold-primary);
+  box-shadow: 0 0 24px rgba(255, 197, 27, 0.1);
+}
+
+.degree-step.is-current > span {
+  animation: degree-pulse 1400ms ease-in-out infinite;
+}
+
+.degree-step.is-locked {
+  opacity: 0.66;
+}
+
+.next-degree-card,
+.graduation-note,
+.achievement-empty,
+.development-signal,
+.evolution-stat {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.next-degree-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.next-degree-card p {
+  color: #b8b8b8;
+  font-size: 0.82rem;
+}
+
+.next-degree-card strong {
+  display: block;
+  margin-top: 0.15rem;
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+.next-degree-card > span {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 197, 27, 0.32);
+  background: rgba(255, 197, 27, 0.1);
+  padding: 0.45rem 0.7rem;
+  color: var(--gold-primary);
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.graduation-note {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  color: #d4d4d8;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.graduation-note svg {
+  flex: 0 0 auto;
+  color: var(--gold-primary);
+}
+
+.graduation-note strong {
+  color: var(--gold-primary);
+}
+
+.development-signal {
+  padding: 0.9rem;
+  transition:
+    border-color 220ms ease,
+    transform 220ms ease;
+}
+
+.development-signal:hover,
+.evolution-stat:hover {
+  border-color: rgba(255, 197, 27, 0.3);
+  transform: translateY(-1px);
+}
+
+.development-signal span,
+.evolution-stat span {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border-radius: 0.6rem;
+  background: var(--belt-accent-soft);
+  color: var(--gold-primary);
+}
+
+.development-signal strong,
+.development-signal small {
+  display: block;
+}
+
+.development-signal strong {
+  margin-top: 0.7rem;
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.development-signal small {
+  margin-top: 0.15rem;
+  color: #a1a1aa;
+  font-size: 0.78rem;
+}
+
+.achievement-empty {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1rem;
+  color: #bdbdbd;
+  font-size: 0.9rem;
+}
+
+.achievement-empty svg {
+  color: var(--gold-primary);
+  flex: 0 0 auto;
+}
+
+.evolution-stat {
+  padding: 1rem;
+  transition:
+    border-color 220ms ease,
+    transform 220ms ease;
+}
+
+.evolution-stat small,
+.evolution-stat strong {
+  display: block;
+}
+
+.evolution-stat small {
+  margin-top: 0.8rem;
+  color: #a1a1aa;
+  font-size: 0.78rem;
+}
+
+.evolution-stat strong {
+  margin-top: 0.15rem;
+  color: #fff;
+  font-size: 1.3rem;
+}
+
+.evolution-stat.is-danger strong,
+.evolution-stat.is-danger span {
+  color: var(--error);
+}
+
+@keyframes degree-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 197, 27, 0.24);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 197, 27, 0);
+  }
+}
+
+@media (max-width: 760px) {
+  .student-profile-card {
+    text-align: center;
+  }
+
+  .student-profile-card .graduation-badge,
+  .student-profile-card .inline-flex {
+    margin-inline: auto;
+  }
+
+  .student-level-card {
+    width: 100%;
+  }
+
+  .belt-header,
+  .next-degree-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .degree-roadmap {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .evolution-belt-card {
+    padding: 1rem;
+  }
+
+  .jiu-belt {
+    min-height: 4.1rem;
+  }
+
+  .belt-label {
+    max-width: 48%;
+    line-height: 1.15;
+  }
+
+  .belt-rank-panel {
+    min-width: 5rem;
+    padding-inline: 0.65rem;
+  }
+
+  .degree-roadmap {
+    grid-template-columns: 1fr;
+  }
 }
 
 ::-webkit-scrollbar {
