@@ -32,6 +32,7 @@ import {
   Trash2,
   Trophy,
   Upload,
+  Search,
   UserPlus,
   UserRound,
   Users
@@ -1983,11 +1984,38 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
   });
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [videoMessage, setVideoMessage] = useState("");
-  const grouped = useMemo(() => groupBy(data ?? [], (item) => item.category), [data]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeCategory, setActiveCategory] = useState("Todas");
+  const [selectedTechniqueId, setSelectedTechniqueId] = useState("");
+  const techniques = data ?? [];
+  const categories = useMemo(() => ["Todas", ...Array.from(new Set(techniques.map((item) => item.category))).sort()], [techniques]);
+  const filteredTechniques = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    return techniques.filter((technique) => {
+      const matchesCategory = activeCategory === "Todas" || technique.category === activeCategory;
+      const searchable = `${technique.name} ${technique.category} ${technique.description ?? ""} ${technique.notes ?? ""}`.toLowerCase();
+      return matchesCategory && (!normalizedSearch || searchable.includes(normalizedSearch));
+    });
+  }, [activeCategory, searchTerm, techniques]);
+  const selectedTechnique =
+    filteredTechniques.find((technique) => technique.id === selectedTechniqueId) ??
+    filteredTechniques.find((technique) => technique.video_url) ??
+    filteredTechniques[0] ??
+    null;
+  const stats = {
+    total: techniques.length,
+    videos: techniques.filter((technique) => technique.video_url).length,
+    learned: techniques.filter((technique) => technique.status === "learned").length,
+    developing: techniques.filter((technique) => technique.status === "developing").length
+  };
 
   useEffect(() => {
     if (isAdmin && students.data?.[0] && !studentId) setStudentId(students.data[0].id);
   }, [isAdmin, studentId, students.data]);
+
+  useEffect(() => {
+    if (!categories.includes(activeCategory)) setActiveCategory("Todas");
+  }, [activeCategory, categories]);
 
   async function updateStatus(techniqueId: string, status: Technique["status"]) {
     await request(`/techniques/${techniqueId}/status`, token, {
@@ -2050,7 +2078,7 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
 
   return (
     <div className="space-y-5">
-      <PageTitle title="Técnicas e evolução" subtitle="Categorias, status técnico e acompanhamento por aluno" />
+      <PageTitle title="Técnicas e evolução" subtitle="Mostruário técnico, vídeos de treino e evolução do aluno" />
       {isAdmin && (
         <Card className="space-y-4">
           <Select value={studentId} onChange={(event) => setStudentId(event.target.value)}>
@@ -2092,53 +2120,145 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
       )}
       {loading && <Loading title="Carregando técnicas" />}
       {error && <ErrorBox message={error} />}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {Object.entries(grouped).map(([category, items]) => (
-          <Card key={category}>
-            <h3 className="text-lg font-bold text-white">{category}</h3>
-            <div className="mt-4 space-y-3">
-              {items.map((technique) => (
-                <div key={technique.id} className="rounded-lg border border-royal-line bg-black/20 p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-white">{technique.name}</p>
-                      <p className="mt-1 text-sm text-royal-muted">{technique.description}</p>
-                      {technique.notes && <p className="mt-2 text-sm text-zinc-300">Obs: {technique.notes}</p>}
-                      {technique.video_url && (
-                        <div className="mt-3 overflow-hidden rounded-lg border border-royal-line bg-black/40">
-                          <video className="aspect-video w-full bg-black object-contain" src={mediaUrl(technique.video_url)} controls preload="metadata" />
-                          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
-                            <span className="text-xs font-semibold text-royal-muted">Vídeo demonstrativo da academia</span>
-                            <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={mediaUrl(technique.video_url)} download target="_blank" rel="noreferrer">
-                              <Download size={14} /> Baixar MP4
-                            </a>
+      {!loading && !error && (
+        <>
+          <Card>
+            <div className="grid gap-4 xl:grid-cols-[1fr_auto] xl:items-center">
+              <div>
+                <p className="section-kicker">Biblioteca técnica</p>
+                <h3 className="mt-1 text-xl font-black text-white">Mostruário de técnicas</h3>
+                <p className="mt-2 text-sm leading-6 text-royal-muted">Filtre por categoria, procure a técnica e abra o vídeo sem misturar tudo na mesma lista.</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-4 xl:min-w-[520px]">
+                <TechniqueMetric label="Técnicas" value={stats.total} />
+                <TechniqueMetric label="Vídeos" value={stats.videos} />
+                <TechniqueMetric label="Aprendidas" value={stats.learned} />
+                <TechniqueMetric label="Evoluindo" value={stats.developing} />
+              </div>
+            </div>
+            <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(220px,320px)_1fr]">
+              <label className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-royal-muted" size={16} />
+                <Input className="pl-9" placeholder="Buscar técnica, categoria ou observação" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
+              </label>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {categories.map((category) => (
+                  <button
+                    key={category}
+                    type="button"
+                    className={`whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                      activeCategory === category
+                        ? "border-royal-gold bg-royal-gold text-black"
+                        : "border-royal-line bg-black/25 text-zinc-300 hover:border-royal-gold hover:text-royal-gold"
+                    }`}
+                    onClick={() => setActiveCategory(category)}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </Card>
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+            <Card className="min-h-[360px]">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="section-kicker">Lista filtrada</p>
+                  <h3 className="text-lg font-black text-white">{filteredTechniques.length} técnica(s)</h3>
+                </div>
+                <Badge>{activeCategory}</Badge>
+              </div>
+              <div className="grid gap-3">
+                {filteredTechniques.length === 0 && <EmptyState>Nenhuma técnica encontrada com esse filtro.</EmptyState>}
+                {filteredTechniques.map((technique) => {
+                  const isSelected = selectedTechnique?.id === technique.id;
+                  return (
+                    <div
+                      key={technique.id}
+                      className={`rounded-lg border p-4 transition ${
+                        isSelected ? "border-royal-gold bg-royal-gold/10" : "border-royal-line bg-black/20 hover:border-royal-gold/50"
+                      }`}
+                    >
+                      <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
+                        <button type="button" className="min-w-0 text-left" onClick={() => setSelectedTechniqueId(technique.id)}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="font-bold text-white">{technique.name}</h4>
+                            {techniqueBadge(technique.status)}
+                            {technique.video_url && <Badge tone="gold">Vídeo</Badge>}
                           </div>
+                          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-royal-gold/80">{technique.category}</p>
+                          {technique.description && <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-300">{technique.description}</p>}
+                          {technique.notes && <p className="mt-2 line-clamp-2 text-sm text-royal-muted">Obs: {technique.notes}</p>}
+                        </button>
+                        <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
+                          {technique.video_url && (
+                            <Button variant={isSelected ? "primary" : "ghost"} className="min-h-8 px-3 text-xs" onClick={() => setSelectedTechniqueId(technique.id)}>
+                              <Eye size={14} /> Assistir
+                            </Button>
+                          )}
+                          {isAdmin && (
+                            <>
+                              <Button variant="ghost" className="min-h-8 px-3 text-xs" onClick={() => editTechnique(technique)}>
+                                <Pencil size={14} /> Editar
+                              </Button>
+                              <Button variant="danger" className="min-h-8 px-3 text-xs" onClick={() => removeTechnique(technique.id)}>
+                                <Trash2 size={14} /> Remover
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      {isAdmin && (
+                        <div className="mt-3 flex flex-wrap gap-2 border-t border-royal-line pt-3">
+                          {(["learned", "developing", "not_learned"] as const).map((status) => (
+                            <Button key={status} variant={technique.status === status ? "primary" : "ghost"} className="min-h-8 px-3 text-xs" onClick={() => updateStatus(technique.id, status)}>
+                              {techniqueStatus(status)}
+                            </Button>
+                          ))}
                         </div>
                       )}
                     </div>
-                    {techniqueBadge(technique.status)}
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card className="xl:sticky xl:top-4 xl:self-start">
+              <p className="section-kicker">Mostruário</p>
+              <h3 className="mt-1 text-lg font-black text-white">{selectedTechnique?.name ?? "Selecione uma técnica"}</h3>
+              {selectedTechnique?.video_url ? (
+                <div className="mt-4 overflow-hidden rounded-lg border border-royal-line bg-black/45">
+                  <video className="aspect-video w-full bg-black object-contain" src={mediaUrl(selectedTechnique.video_url)} controls preload="metadata" />
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
+                    <span className="text-xs font-semibold text-royal-muted">{selectedTechnique.category}</span>
+                    <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={mediaUrl(selectedTechnique.video_url)} download target="_blank" rel="noreferrer">
+                      <Download size={14} /> Baixar MP4
+                    </a>
                   </div>
-                  {isAdmin && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button variant="ghost" className="min-h-8 px-3 text-xs" onClick={() => editTechnique(technique)}>
-                        Editar
-                      </Button>
-                      {(["learned", "developing", "not_learned"] as const).map((status) => (
-                        <Button key={status} variant="ghost" className="min-h-8 px-3 text-xs" onClick={() => updateStatus(technique.id, status)}>
-                          {techniqueStatus(status)}
-                        </Button>
-                      ))}
-                      <Button variant="danger" className="min-h-8 px-3 text-xs" onClick={() => removeTechnique(technique.id)}>
-                        Remover
-                      </Button>
-                    </div>
-                  )}
                 </div>
-              ))}
-            </div>
-          </Card>
-        ))}
-      </div>
+              ) : (
+                <EmptyState>{selectedTechnique ? "Essa técnica ainda não tem vídeo cadastrado." : "Selecione uma técnica da lista para ver o vídeo."}</EmptyState>
+              )}
+              {selectedTechnique && (
+                <div className="mt-4 space-y-2 text-sm leading-6 text-zinc-300">
+                  {selectedTechnique.description && <p>{selectedTechnique.description}</p>}
+                  {selectedTechnique.notes && <p className="text-royal-muted">Obs: {selectedTechnique.notes}</p>}
+                </div>
+              )}
+            </Card>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TechniqueMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-royal-line bg-black/25 px-3 py-2">
+      <span className="block text-xs font-semibold text-royal-muted">{label}</span>
+      <strong className="mt-1 block text-xl text-white">{value}</strong>
     </div>
   );
 }
