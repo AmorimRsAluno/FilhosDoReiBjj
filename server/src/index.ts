@@ -38,7 +38,7 @@ app.use(
     }
   })
 );
-app.use(express.json({ limit: "3mb" }));
+app.use(express.json({ limit: "75mb" }));
 
 const money = (value: unknown) => Number(value ?? 0);
 const levelFromXp = (xp: number) => Math.min(100, Math.max(1, Math.floor(xp / 500) + 1));
@@ -1134,6 +1134,55 @@ app.get("/api/student/finance", requireAuth, async (req, res) => {
   res.json(result.rows);
 });
 
+app.post("/api/student/finance/advance", requireAuth, requireRole(["student"]), async (req, res) => {
+  const parsed = z.object({ months: z.coerce.number().int().min(1).max(6) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Informe de 1 a 6 mensalidades adiantadas." });
+
+  const studentId = await resolveStudentId(req.user?.id);
+  if (!studentId) return res.status(404).json({ message: "Aluno nao encontrado." });
+
+  const planResult = await query<{
+    plan_id: string | null;
+    plan_name: string;
+    monthly_value: string;
+    due_day: number;
+  }>(
+    `SELECT s.plan_id, mp.name AS plan_name, mp.monthly_value, mp.due_day
+     FROM students s
+     JOIN membership_plans mp ON mp.id = s.plan_id
+     WHERE s.id = $1 AND mp.status = 'active'`,
+    [studentId]
+  );
+  const plan = planResult.rows[0];
+  if (!plan?.plan_id) return res.status(400).json({ message: "Aluno sem plano ativo para gerar mensalidade." });
+
+  const latestResult = await query<{ due_date: string }>(
+    "SELECT due_date FROM payments WHERE student_id = $1 ORDER BY due_date DESC LIMIT 1",
+    [studentId]
+  );
+  const baseDate = latestResult.rows[0]?.due_date ? new Date(`${latestResult.rows[0].due_date}T00:00:00`) : new Date();
+  const created: unknown[] = [];
+
+  for (let index = 1; index <= parsed.data.months; index += 1) {
+    const dueDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + index, Number(plan.due_day ?? 10));
+    const dueDateText = dueDate.toISOString().slice(0, 10);
+    const month = referenceMonth(dueDateText);
+    const pixCode = `PIX ${plan.plan_name} ${studentId.slice(0, 8)} ${month}`;
+    const inserted = await query(
+      `INSERT INTO payments (student_id, reference_month, due_date, value, status, pix_code)
+       SELECT $1, $2, $3::date, $4, 'pending', $5
+       WHERE NOT EXISTS (
+         SELECT 1 FROM payments WHERE student_id = $1 AND due_date = $3::date
+       )
+       RETURNING id, reference_month, due_date, paid_at, value, status, pix_code`,
+      [studentId, month, dueDateText, plan.monthly_value, pixCode]
+    );
+    if (inserted.rows[0]) created.push(inserted.rows[0]);
+  }
+
+  res.status(201).json({ created, createdCount: created.length });
+});
+
 app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
   const period = financePeriod(req.query.month);
   const [entries, payments, pendingPayments] = await Promise.all([
@@ -1201,7 +1250,7 @@ app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teach
     sheet.properties.defaultRowHeight = 22;
 
     sheet.mergeCells("A1:G1");
-    sheet.getCell("A1").value = "FILHOS DO REI BJJ - WILLIAM LAGO";
+    sheet.getCell("A1").value = "FILHOS DO REI BJJ - WILIAN LAGO";
     sheet.getCell("A1").font = { bold: true, color: { argb: "FFFFC40F" }, size: 18 };
     sheet.getCell("A1").alignment = { horizontal: "center", vertical: "middle" };
     sheet.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0D0D0D" } };
@@ -1463,6 +1512,50 @@ app.get("/api/techniques", requireAuth, async (req, res) => {
     [studentId]
   );
   res.json(result.rows);
+});
+
+app.post("/api/techniques/video", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  const parsed = z
+    .object({
+      fileName: z.string().min(1).max(180),
+      dataUrl: z.string().max(75_000_000)
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Video invalido." });
+
+  const match = parsed.data.dataUrl.match(/^data:video\/mp4;base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return res.status(400).json({ message: "Envie um video MP4 valido." });
+
+  const buffer = Buffer.from(match[1], "base64");
+  if (buffer.length > 50 * 1024 * 1024) {
+    return res.status(400).json({ message: "Envie um video de ate 50 MB." });
+  }
+
+  const protocol = String(req.headers["x-forwarded-proto"] ?? req.protocol).split(",")[0];
+  const result = await query<{ id: string }>(
+    `INSERT INTO technique_videos (original_name, mime_type, content, size_bytes)
+     VALUES ($1, 'video/mp4', $2, $3)
+     RETURNING id`,
+    [parsed.data.fileName, buffer, buffer.length]
+  );
+  const videoUrl = `${protocol}://${req.get("host")}/api/techniques/video/${result.rows[0].id}/file`;
+  res.status(201).json({ videoUrl, originalName: parsed.data.fileName });
+});
+
+app.get("/api/techniques/video/:id/file", async (req, res) => {
+  const result = await query<{
+    original_name: string;
+    mime_type: string;
+    content: Buffer;
+    size_bytes: number;
+  }>("SELECT original_name, mime_type, content, size_bytes FROM technique_videos WHERE id = $1", [req.params.id]);
+  const video = result.rows[0];
+  if (!video) return res.status(404).json({ message: "Video nao encontrado." });
+
+  res.setHeader("Content-Type", video.mime_type);
+  res.setHeader("Content-Length", String(video.size_bytes));
+  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(video.original_name)}"`);
+  res.end(video.content);
 });
 
 app.post("/api/techniques", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {

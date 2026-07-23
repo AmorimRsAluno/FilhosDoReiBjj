@@ -31,6 +31,7 @@ import {
   Sun,
   Trash2,
   Trophy,
+  Upload,
   UserPlus,
   UserRound,
   Users
@@ -310,7 +311,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         <div className="login-card-shine" aria-hidden="true" />
         <header className="login-identity">
           <button className="login-logo-button" type="button" aria-label="Logo Filhos do Rei BJJ">
-            <img src="/logo-filhos-do-rei.png" className="academy-logo" alt="Filhos do Rei BJJ William Lago" />
+            <img src="/logo-filhos-do-rei.png" className="academy-logo" alt="Filhos do Rei BJJ Wilian Lago" />
           </button>
           <h1 className="login-title">FILHOS DO REI BJJ</h1>
           <p className="login-subtitle">BRAZILIAN JIU-JITSU ACADEMY</p>
@@ -1406,14 +1407,55 @@ function StudentDashboardView({ token }: { token: string }) {
 function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boolean }) {
   if (isAdmin) return <BusinessFinancePanel token={token} />;
 
-  const students = useApi<Student[]>(isAdmin ? "/students" : null, token);
-  const [studentId, setStudentId] = useState("");
-  const path = isAdmin ? (studentId ? `/student/finance?studentId=${studentId}` : null) : "/student/finance";
-  const { data, loading, error, reload } = useApi<Payment[]>(path, token);
+  const { data, loading, error, reload } = useApi<Payment[]>("/student/finance", token);
+  const [advanceMonths, setAdvanceMonths] = useState("1");
+  const [advanceLoading, setAdvanceLoading] = useState(false);
+  const [financeMessage, setFinanceMessage] = useState("");
 
-  useEffect(() => {
-    if (isAdmin && students.data?.[0] && !studentId) setStudentId(students.data[0].id);
-  }, [isAdmin, studentId, students.data]);
+  const payments = data ?? [];
+  const openPayments = payments
+    .filter((payment) => payment.status !== "paid")
+    .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
+  const paidPayments = payments
+    .filter((payment) => payment.status === "paid")
+    .sort((a, b) => new Date(b.due_date).getTime() - new Date(a.due_date).getTime());
+  const sortedPayments = [...openPayments, ...paidPayments];
+  const featuredPayment = openPayments[0] ?? sortedPayments[0] ?? null;
+  const openTotal = openPayments.reduce((sum, payment) => sum + Number(payment.value ?? 0), 0);
+  const paidTotal = paidPayments.reduce((sum, payment) => sum + Number(payment.value ?? 0), 0);
+  const paidPercent = payments.length ? Math.round((paidPayments.length / payments.length) * 100) : 0;
+
+  async function copyPix(payment: Payment) {
+    await navigator.clipboard?.writeText(payment.pix_code);
+    setFinanceMessage(`PIX de ${payment.reference_month} copiado.`);
+  }
+
+  async function createAdvancePayments() {
+    setAdvanceLoading(true);
+    setFinanceMessage("");
+    try {
+      const result = await request<{ createdCount: number }>("/student/finance/advance", token, {
+        method: "POST",
+        body: JSON.stringify({ months: Number(advanceMonths) })
+      });
+      setFinanceMessage(
+        result.createdCount > 0
+          ? `${result.createdCount} mensalidade(s) adiantada(s) gerada(s).`
+          : "As mensalidades futuras desse período já estavam geradas."
+      );
+      reload();
+    } catch (err) {
+      setFinanceMessage(err instanceof Error ? err.message : "Não foi possível gerar mensalidade adiantada.");
+    } finally {
+      setAdvanceLoading(false);
+    }
+  }
+
+  function paymentCardClass(status: Payment["status"]) {
+    if (status === "paid") return "border-emerald-400/30 bg-emerald-400/5";
+    if (status === "overdue") return "border-royal-red/40 bg-royal-red/10";
+    return "border-royal-gold/35 bg-royal-gold/10";
+  }
 
   async function updatePayment(id: string, status: Payment["status"]) {
     await request(`/payments/${id}/status`, token, {
@@ -1425,21 +1467,117 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
 
   return (
     <div className="space-y-5">
-      <PageTitle title="Financeiro" subtitle="Mensalidades, vencimentos, PIX e histórico" />
-      {isAdmin && (
-        <Card>
-          <Select value={studentId} onChange={(event) => setStudentId(event.target.value)}>
-            {students.data?.map((student) => (
-              <option value={student.id} key={student.id}>
-                {student.full_name}
-              </option>
-            ))}
-          </Select>
-        </Card>
-      )}
+      <PageTitle title="Financeiro" subtitle="Mensalidades, PIX, histórico e pagamentos adiantados" />
       {loading && <Loading title="Carregando financeiro" />}
       {error && <ErrorBox message={error} />}
-      <div className="grid gap-3">
+      {!loading && !error && (
+        <>
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_.85fr]">
+            <Card className="overflow-hidden">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="section-kicker">Mensalidade em destaque</p>
+                  <h3 className="mt-1 text-2xl font-black text-white">
+                    {featuredPayment ? featuredPayment.reference_month : "Sem mensalidade gerada"}
+                  </h3>
+                  <p className="mt-2 text-sm text-royal-muted">
+                    {featuredPayment
+                      ? `Vencimento ${formatDate(featuredPayment.due_date)}`
+                      : "Quando uma mensalidade for gerada, o PIX e o vencimento aparecem aqui."}
+                  </p>
+                </div>
+                {featuredPayment && statusBadge(featuredPayment.status)}
+              </div>
+              {featuredPayment ? (
+                <div className="mt-6 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+                  <div>
+                    <span className="text-sm text-royal-muted">Valor</span>
+                    <p className="mt-1 text-3xl font-black text-royal-gold">{formatMoney(featuredPayment.value)}</p>
+                    <code className="mt-4 block rounded-lg border border-royal-line bg-black/35 p-3 text-xs text-zinc-300">{featuredPayment.pix_code}</code>
+                  </div>
+                  <Button onClick={() => copyPix(featuredPayment)}>
+                    <CreditCard size={16} /> Copiar PIX
+                  </Button>
+                </div>
+              ) : (
+                <EmptyState>Nenhuma mensalidade encontrada.</EmptyState>
+              )}
+            </Card>
+
+            <Card>
+              <p className="section-kicker">Pagamento adiantado</p>
+              <h3 className="mt-1 text-lg font-black text-white">Gerar próximas mensalidades</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">
+                Gere mensalidades futuras para copiar o PIX e antecipar o pagamento quando quiser.
+              </p>
+              <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
+                <Select value={advanceMonths} onChange={(event) => setAdvanceMonths(event.target.value)}>
+                  <option value="1">1 mensalidade</option>
+                  <option value="2">2 mensalidades</option>
+                  <option value="3">3 mensalidades</option>
+                  <option value="6">6 mensalidades</option>
+                </Select>
+                <Button disabled={advanceLoading} onClick={createAdvancePayments}>
+                  <Plus size={16} /> {advanceLoading ? "Gerando..." : "Gerar"}
+                </Button>
+              </div>
+              {financeMessage && <p className="mt-3 text-sm font-semibold text-royal-gold">{financeMessage}</p>}
+            </Card>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <Card>
+              <span className="text-sm text-royal-muted">Em aberto</span>
+              <p className="mt-2 text-2xl font-black text-white">{formatMoney(openTotal)}</p>
+            </Card>
+            <Card>
+              <span className="text-sm text-royal-muted">Pago no histórico</span>
+              <p className="mt-2 text-2xl font-black text-white">{formatMoney(paidTotal)}</p>
+            </Card>
+            <Card>
+              <span className="text-sm text-royal-muted">Organização</span>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                <div className="h-full rounded-full bg-royal-gold" style={{ width: `${paidPercent}%` }} />
+              </div>
+              <p className="mt-2 text-sm text-zinc-300">{paidPercent}% das mensalidades listadas estão pagas</p>
+            </Card>
+          </div>
+
+          <Card>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="section-kicker">Histórico financeiro</p>
+                <h3 className="text-lg font-black text-white">Mensalidades</h3>
+              </div>
+              <Badge>{payments.length} registro(s)</Badge>
+            </div>
+            <div className="grid gap-3">
+              {sortedPayments.length === 0 && <EmptyState>Nenhuma mensalidade gerada até agora.</EmptyState>}
+              {sortedPayments.map((payment) => (
+                <div key={payment.id} className={`rounded-lg border p-4 ${paymentCardClass(payment.status)}`}>
+                  <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="font-bold text-white">{payment.reference_month}</h4>
+                        {statusBadge(payment.status)}
+                      </div>
+                      <p className="mt-1 text-sm text-royal-muted">
+                        Vencimento {formatDate(payment.due_date)} · {formatMoney(payment.value)}
+                        {payment.paid_at ? ` · pago em ${formatDate(payment.paid_at)}` : ""}
+                      </p>
+                      <code className="mt-3 block rounded-lg border border-white/10 bg-black/35 p-3 text-xs text-zinc-300">{payment.pix_code}</code>
+                    </div>
+                    <Button variant={payment.status === "paid" ? "ghost" : "primary"} onClick={() => copyPix(payment)}>
+                      <CreditCard size={16} /> Copiar PIX
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </>
+      )}
+      <div className="hidden">
         {data?.map((payment) => (
           <Card key={payment.id} className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
             <div>
@@ -1843,6 +1981,8 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
     videoUrl: "",
     notes: ""
   });
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [videoMessage, setVideoMessage] = useState("");
   const grouped = useMemo(() => groupBy(data ?? [], (item) => item.category), [data]);
 
   useEffect(() => {
@@ -1857,6 +1997,28 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
     reload();
   }
 
+  async function uploadTechniqueVideo(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+
+    setUploadingVideo(true);
+    setVideoMessage("");
+    try {
+      const dataUrl = await videoFileToDataUrl(file);
+      const result = await request<{ videoUrl: string }>("/techniques/video", token, {
+        method: "POST",
+        body: JSON.stringify({ fileName: file.name, dataUrl })
+      });
+      setTechniqueForm((current) => ({ ...current, videoUrl: result.videoUrl }));
+      setVideoMessage("Vídeo MP4 enviado e vinculado à técnica.");
+    } catch (err) {
+      setVideoMessage(err instanceof Error ? err.message : "Não foi possível enviar o vídeo.");
+    } finally {
+      setUploadingVideo(false);
+    }
+  }
+
   async function saveTechnique(event: React.FormEvent) {
     event.preventDefault();
     await request(editingTechniqueId ? `/techniques/${editingTechniqueId}` : "/techniques", token, {
@@ -1865,6 +2027,7 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
     });
     setEditingTechniqueId("");
     setTechniqueForm({ category: "Guarda Fechada", name: "", description: "", videoUrl: "", notes: "" });
+    setVideoMessage("");
     reload();
   }
 
@@ -1877,6 +2040,7 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
       videoUrl: technique.video_url ?? "",
       notes: technique.notes ?? ""
     });
+    setVideoMessage("");
   }
 
   async function removeTechnique(id: string) {
@@ -1900,11 +2064,16 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
             <Input placeholder="Categoria" value={techniqueForm.category} onChange={(e) => setTechniqueForm({ ...techniqueForm, category: e.target.value })} required />
             <Input placeholder="Nome da técnica" value={techniqueForm.name} onChange={(e) => setTechniqueForm({ ...techniqueForm, name: e.target.value })} required />
             <Input className="lg:col-span-2" placeholder="Descrição" value={techniqueForm.description} onChange={(e) => setTechniqueForm({ ...techniqueForm, description: e.target.value })} />
-            <Input placeholder="URL do vídeo" value={techniqueForm.videoUrl} onChange={(e) => setTechniqueForm({ ...techniqueForm, videoUrl: e.target.value })} />
+            <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-royal-gold/40 bg-royal-gold/10 px-4 text-sm font-semibold text-royal-gold transition hover:bg-royal-gold/15">
+              <Upload size={16} /> {uploadingVideo ? "Enviando MP4..." : "Enviar MP4"}
+              <input className="hidden" type="file" accept="video/mp4" disabled={uploadingVideo} onChange={uploadTechniqueVideo} />
+            </label>
             <Button>
               <Save size={16} /> {editingTechniqueId ? "Salvar" : "Adicionar"}
             </Button>
-            <Input className="lg:col-span-5" placeholder="Observações do professor" value={techniqueForm.notes} onChange={(e) => setTechniqueForm({ ...techniqueForm, notes: e.target.value })} />
+            <Input className="lg:col-span-3" placeholder="Link do vídeo ou MP4 enviado" value={techniqueForm.videoUrl} onChange={(e) => setTechniqueForm({ ...techniqueForm, videoUrl: e.target.value })} />
+            <Input className="lg:col-span-2" placeholder="Observações do professor" value={techniqueForm.notes} onChange={(e) => setTechniqueForm({ ...techniqueForm, notes: e.target.value })} />
+            {videoMessage && <p className="text-sm font-semibold text-royal-gold lg:col-span-6">{videoMessage}</p>}
             {editingTechniqueId && (
               <Button
                 type="button"
@@ -1912,6 +2081,7 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
                 onClick={() => {
                   setEditingTechniqueId("");
                   setTechniqueForm({ category: "Guarda Fechada", name: "", description: "", videoUrl: "", notes: "" });
+                  setVideoMessage("");
                 }}
               >
                 Cancelar edição
@@ -1930,14 +2100,20 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
               {items.map((technique) => (
                 <div key={technique.id} className="rounded-lg border border-royal-line bg-black/20 p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="font-semibold text-white">{technique.name}</p>
                       <p className="mt-1 text-sm text-royal-muted">{technique.description}</p>
                       {technique.notes && <p className="mt-2 text-sm text-zinc-300">Obs: {technique.notes}</p>}
                       {technique.video_url && (
-                        <a className="mt-2 inline-flex text-sm font-semibold text-royal-gold hover:text-yellow-200" href={technique.video_url} target="_blank" rel="noreferrer">
-                          Ver vídeo da técnica
-                        </a>
+                        <div className="mt-3 overflow-hidden rounded-lg border border-royal-line bg-black/40">
+                          <video className="aspect-video w-full bg-black object-contain" src={mediaUrl(technique.video_url)} controls preload="metadata" />
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
+                            <span className="text-xs font-semibold text-royal-muted">Vídeo demonstrativo da academia</span>
+                            <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={mediaUrl(technique.video_url)} download target="_blank" rel="noreferrer">
+                              <Download size={14} /> Baixar MP4
+                            </a>
+                          </div>
+                        </div>
                       )}
                     </div>
                     {techniqueBadge(technique.status)}
@@ -2294,7 +2470,7 @@ function Logo({ size = "sm" }: { size?: "sm" | "lg" }) {
       />
       <div>
         <p className={`${size === "lg" ? "text-xl" : "text-base"} font-black leading-tight text-white`}>FILHOS DO REI BJJ</p>
-        <p className="text-xs font-semibold uppercase tracking-wider text-royal-gold">WILLIAM LAGO</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-royal-gold">WILIAN LAGO</p>
       </div>
     </div>
   );
@@ -2595,6 +2771,30 @@ function imageFileToProfileDataUrl(file: File) {
 
     image.src = objectUrl;
   });
+}
+
+function videoFileToDataUrl(file: File) {
+  if (file.type !== "video/mp4" && !file.name.toLowerCase().endsWith(".mp4")) {
+    return Promise.reject(new Error("Selecione um arquivo MP4."));
+  }
+
+  if (file.size > 50 * 1024 * 1024) {
+    return Promise.reject(new Error("Envie um vídeo de até 50 MB."));
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Não foi possível ler o vídeo."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function mediaUrl(value?: string | null) {
+  if (!value) return "";
+  if (/^(https?:|data:|blob:)/.test(value)) return value;
+  const apiOrigin = API_URL.replace(/\/api\/?$/, "");
+  return `${apiOrigin}${value.startsWith("/") ? value : `/${value}`}`;
 }
 
 function currentMonthValue() {

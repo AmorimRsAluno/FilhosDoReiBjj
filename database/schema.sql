@@ -236,6 +236,15 @@ CREATE TABLE IF NOT EXISTS techniques (
 ALTER TABLE techniques ADD COLUMN IF NOT EXISTS video_url TEXT;
 ALTER TABLE techniques ADD COLUMN IF NOT EXISTS notes TEXT;
 
+CREATE TABLE IF NOT EXISTS technique_videos (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL DEFAULT 'video/mp4',
+  content BYTEA NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS student_techniques (
   student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   technique_id UUID NOT NULL REFERENCES techniques(id) ON DELETE CASCADE,

@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const schemaPath = resolve(__dirname, "../../../database/schema.sql");
 
 const avatars = {
-  admin: "https://api.dicebear.com/9.x/initials/svg?seed=William%20Lago",
+  admin: "https://api.dicebear.com/9.x/initials/svg?seed=Wilian%20Lago",
   ana: "https://api.dicebear.com/9.x/initials/svg?seed=Ana%20Souza",
   bruno: "https://api.dicebear.com/9.x/initials/svg?seed=Bruno%20Lima",
   carla: "https://api.dicebear.com/9.x/initials/svg?seed=Carla%20Mendes",
@@ -49,7 +49,7 @@ async function main() {
   const adminPasswordHash = await bcrypt.hash("Admin@2026", 10);
   const adminId = await upsertUser("Admin", "admin@filhosdorei.local", "admin", adminPasswordHash, avatars.admin, "Admin");
   const teacherId = await upsertUser(
-    "Professor William",
+    "Professor Wilian",
     "professor@filhosdorei.com",
     "teacher",
     passwordHash,
@@ -68,7 +68,7 @@ async function main() {
 
   const teacher = await pool.query<{ id: string }>(
     `INSERT INTO teachers (user_id, name, belt, phone)
-     VALUES ($1, 'Professor William', 'Preta', '(11) 99999-0000')
+     VALUES ($1, 'Professor Wilian', 'Preta', '(11) 99999-0000')
      ON CONFLICT (user_id)
      DO UPDATE SET name = EXCLUDED.name
      RETURNING id`,
@@ -257,7 +257,7 @@ async function main() {
       "https://images.unsplash.com/photo-1599058917212-d750089bc07e?auto=format&fit=crop&w=900&q=80"
     ],
     [
-      "Camiseta Team William Lago",
+      "Camiseta Team Wilian Lago",
       "Camiseta",
       89,
       22,

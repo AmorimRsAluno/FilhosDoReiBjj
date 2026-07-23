@@ -10,6 +10,9 @@ dist
 .DS_Store
 npm-debug.log*
 logs
+server-local*.log
+uploads
+server/uploads
 *.tsbuildinfo
 android/.gradle
 android/build
