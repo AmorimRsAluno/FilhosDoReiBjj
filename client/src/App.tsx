@@ -544,7 +544,7 @@ function StudentApp({ session, onLogout }: { session: Session; onLogout: () => v
       {tab === "home" && <StudentDashboardView token={session.token} />}
       {tab === "finance" && <FinancePanel token={session.token} />}
       {tab === "techniques" && <TechniquesPanel token={session.token} />}
-      {tab === "ranking" && <RankingPanel token={session.token} />}
+      {tab === "ranking" && <RankingPanel token={session.token} currentStudentId={session.student?.id} />}
       {tab === "store" && <StorePanel token={session.token} />}
       {tab === "competitions" && <CompetitionsPanel token={session.token} studentId={session.student?.id} />}
     </Shell>
@@ -2263,41 +2263,211 @@ function TechniqueMetric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function RankingPanel({ token }: { token: string }) {
+function RankingPanel({ token, currentStudentId }: { token: string; currentStudentId?: string }) {
   const [scope, setScope] = useState("monthly");
   const { data, loading, error } = useApi<RankingItem[]>(`/ranking?scope=${scope}`, token);
+  const ranking = data ?? [];
+  const topThree = ranking.slice(0, 3);
+  const otherStudents = ranking.slice(3);
+  const champion = ranking[0];
+  const currentStudent = currentStudentId ? ranking.find((item) => item.id === currentStudentId) : null;
+  const maxTrainings = Math.max(...ranking.map((item) => item.trainings), 1);
+  const maxXp = Math.max(...ranking.map((item) => item.xp), 1);
+  const totalTrainings = ranking.reduce((sum, item) => sum + item.trainings, 0);
 
   return (
     <div className="space-y-5">
-      <PageTitle title="Ranking" subtitle="Frequência, XP e posição dos alunos" />
-      <Card className="flex flex-wrap gap-2">
-        {[
-          ["weekly", "Semanal"],
-          ["monthly", "Mensal"],
-          ["general", "Geral"]
-        ].map(([key, label]) => (
-          <Button key={key} variant={scope === key ? "primary" : "ghost"} onClick={() => setScope(key)}>
-            {label}
-          </Button>
-        ))}
+      <PageTitle title="Ranking" subtitle="Disputa saudável, frequência no tatame e evolução dos alunos" />
+      <Card className="overflow-hidden">
+        <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
+          <div>
+            <p className="section-kicker">Corrida do tatame</p>
+            <h3 className="mt-1 text-2xl font-black text-white">
+              {champion ? `${champion.full_name} lidera o desafio` : "Ranking aguardando treinos"}
+            </h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-royal-muted">
+              Acompanhe quem mais treinou no período. O ranking combina presença e XP para manter a disputa divertida.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[460px]">
+            <RankingMetric label="Atletas" value={ranking.length} />
+            <RankingMetric label="Treinos" value={totalTrainings} />
+            <RankingMetric label="Líder" value={champion ? `#${champion.position}` : "-"} />
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {[
+            ["weekly", "Semanal"],
+            ["monthly", "Mensal"],
+            ["general", "Geral"]
+          ].map(([key, label]) => (
+            <Button key={key} variant={scope === key ? "primary" : "ghost"} onClick={() => setScope(key)}>
+              {label}
+            </Button>
+          ))}
+        </div>
       </Card>
       {loading && <Loading title="Carregando ranking" />}
       {error && <ErrorBox message={error} />}
-      <div className="grid gap-3">
-        {data?.map((item) => (
-          <Card key={item.id} className="grid grid-cols-[auto_auto_1fr_auto] items-center gap-3">
-            <span className="text-2xl font-black text-royal-gold">#{item.position}</span>
-            <Avatar src={item.photo_url} name={item.full_name} />
-            <div>
-              <h3 className="font-bold text-white">{item.full_name}</h3>
-              <p className="text-sm text-royal-muted">{item.belt} · Nível {item.level} · {item.xp} XP</p>
-            </div>
-            <Badge tone="gold">{item.trainings} treinos</Badge>
-          </Card>
-        ))}
+      {!loading && !error && (
+        <>
+          {currentStudent && (
+            <Card className="border-royal-gold/40 bg-royal-gold/10">
+              <div className="grid gap-3 md:grid-cols-[auto_1fr_auto] md:items-center">
+                <Avatar src={currentStudent.photo_url} name={currentStudent.full_name} />
+                <div>
+                  <p className="section-kicker">Sua posição</p>
+                  <h3 className="text-lg font-black text-white">#{currentStudent.position} - {currentStudent.full_name}</h3>
+                  <p className="mt-1 text-sm text-zinc-300">{currentStudent.trainings} treinos · nível {currentStudent.level} · {currentStudent.xp} XP</p>
+                </div>
+                <Badge tone="gold">{rankingMotivation(currentStudent.position)}</Badge>
+              </div>
+            </Card>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-3">
+            {topThree.map((item, index) => (
+              <Card key={item.id} className={`relative overflow-hidden ${index === 0 ? "border-royal-gold/60 bg-royal-gold/10 lg:-translate-y-2" : ""}`}>
+                <div className="absolute right-4 top-4 text-5xl font-black text-white/5">#{item.position}</div>
+                <div className="relative flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`grid h-12 w-12 place-items-center rounded-full border ${podiumTone(index)}`}>
+                      {index === 0 ? <Trophy size={22} /> : index === 1 ? <Medal size={22} /> : <Award size={22} />}
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-royal-gold">{podiumLabel(index)}</p>
+                      <h3 className="mt-1 font-black text-white">{item.full_name}</h3>
+                    </div>
+                  </div>
+                  <Avatar src={item.photo_url} name={item.full_name} />
+                </div>
+                <div className="relative mt-5 grid gap-3">
+                  <RankingProgress label="Treinos" value={item.trainings} max={maxTrainings} suffix="treinos" />
+                  <RankingProgress label="XP" value={item.xp} max={maxXp} suffix="XP" />
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <Badge tone="gold">Nível {item.level}</Badge>
+                  <Badge>{item.belt}</Badge>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
+            <Card>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="section-kicker">Tabela geral</p>
+                  <h3 className="text-lg font-black text-white">Atletas em movimento</h3>
+                </div>
+                <Badge>{rankingScopeLabel(scope)}</Badge>
+              </div>
+              <div className="grid gap-3">
+                {ranking.length === 0 && <EmptyState>Nenhum treino registrado para este período.</EmptyState>}
+                {otherStudents.map((item) => {
+                  const isCurrent = item.id === currentStudentId;
+                  return (
+                    <div key={item.id} className={`rounded-lg border p-3 ${isCurrent ? "border-royal-gold bg-royal-gold/10" : "border-royal-line bg-black/20"}`}>
+                      <div className="grid gap-3 md:grid-cols-[auto_auto_1fr_auto] md:items-center">
+                        <span className="text-xl font-black text-royal-gold">#{item.position}</span>
+                        <Avatar src={item.photo_url} name={item.full_name} />
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="font-bold text-white">{item.full_name}</h4>
+                            {isCurrent && <Badge tone="gold">Você</Badge>}
+                          </div>
+                          <p className="text-sm text-royal-muted">{item.belt} · nível {item.level} · {item.xp} XP</p>
+                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                            <div className="h-full rounded-full bg-royal-gold" style={{ width: `${Math.max(8, (item.trainings / maxTrainings) * 100)}%` }} />
+                          </div>
+                        </div>
+                        <Badge tone="gold">{item.trainings} treinos</Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+
+            <Card className="xl:sticky xl:top-4 xl:self-start">
+              <p className="section-kicker">Desafio</p>
+              <h3 className="mt-1 text-lg font-black text-white">{rankingScopeLabel(scope)}</h3>
+              <div className="mt-4 rounded-lg border border-royal-gold/30 bg-royal-gold/10 p-4">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="text-royal-gold" size={20} />
+                  <p className="font-bold text-white">{rankingChallenge(scope)}</p>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-zinc-300">
+                  Cada check-in validado aumenta sua presença no ranking. Use isso como um jogo saudável de constância.
+                </p>
+              </div>
+              <div className="mt-4 grid gap-2">
+                {topThree.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between rounded-lg border border-royal-line bg-black/25 px-3 py-2 text-sm">
+                    <span className="font-semibold text-white">#{item.position} {item.full_name}</span>
+                    <span className="text-royal-gold">{item.trainings} treinos</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RankingMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border border-royal-line bg-black/25 px-3 py-2">
+      <span className="block text-xs font-semibold text-royal-muted">{label}</span>
+      <strong className="mt-1 block text-xl text-white">{value}</strong>
+    </div>
+  );
+}
+
+function RankingProgress({ label, value, max, suffix }: { label: string; value: number; max: number; suffix: string }) {
+  const percent = Math.max(8, Math.min(100, (value / Math.max(max, 1)) * 100));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold text-royal-muted">
+        <span>{label}</span>
+        <span>{value} {suffix}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-white/10">
+        <div className="h-full rounded-full bg-royal-gold" style={{ width: `${percent}%` }} />
       </div>
     </div>
   );
+}
+
+function podiumLabel(index: number) {
+  return ["Campeão do período", "Vice-líder", "Terceiro lugar"][index] ?? "Destaque";
+}
+
+function podiumTone(index: number) {
+  if (index === 0) return "border-royal-gold/70 bg-royal-gold text-black";
+  if (index === 1) return "border-zinc-300/50 bg-zinc-200 text-zinc-900";
+  return "border-orange-300/50 bg-orange-300 text-zinc-950";
+}
+
+function rankingScopeLabel(scope: string) {
+  if (scope === "weekly") return "Ranking semanal";
+  if (scope === "general") return "Ranking geral";
+  return "Ranking mensal";
+}
+
+function rankingMotivation(position: number) {
+  if (position <= 1) return "Liderando";
+  if (position <= 3) return "No pódio";
+  if (position <= 10) return "Na disputa";
+  return "Continue subindo";
+}
+
+function rankingChallenge(scope: string) {
+  if (scope === "weekly") return "Meta da semana: aparecer no top 3";
+  if (scope === "general") return "Meta geral: manter constância no tatame";
+  return "Meta do mês: somar treinos e subir posições";
 }
 
 function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boolean }) {
