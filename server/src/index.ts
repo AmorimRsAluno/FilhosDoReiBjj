@@ -74,6 +74,11 @@ const phoneSchema = z
   .transform((value) => value.replace(/\D/g, ""))
   .refine((value) => value.length === 10 || value.length === 11, "Telefone precisa ter DDD e 10 ou 11 dígitos.");
 
+const isTechniqueVideoUrl = (value?: string) => {
+  const trimmed = value?.trim() ?? "";
+  return !trimmed || /^https?:\/\//.test(trimmed) || trimmed.startsWith("/api/techniques/video/");
+};
+
 const nullableText = z.string().optional().or(z.literal(""));
 const planPayloadSchema = z.object({
   name: z.string().min(3),
@@ -1593,6 +1598,10 @@ app.post("/api/techniques", requireAuth, requireRole(["admin", "teacher"]), asyn
     .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Técnica inválida." });
 
+  if (!isTechniqueVideoUrl(parsed.data.videoUrl)) {
+    return res.status(400).json({ message: "Informe uma URL de video valida ou envie um MP4." });
+  }
+
   const result = await query(
     `INSERT INTO techniques (category, name, description, video_url, notes)
      VALUES ($1, $2, $3, $4, $5)
@@ -1636,6 +1645,10 @@ app.put("/api/techniques/:id", requireAuth, requireRole(["admin", "teacher"]), a
     })
     .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Técnica inválida." });
+
+  if (!isTechniqueVideoUrl(parsed.data.videoUrl)) {
+    return res.status(400).json({ message: "Informe uma URL de video valida ou envie um MP4." });
+  }
 
   const result = await query(
     `UPDATE techniques

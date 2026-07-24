@@ -239,6 +239,11 @@ UPDATE techniques
 SET video_url = regexp_replace(video_url, '^http://', 'https://')
 WHERE video_url LIKE 'http://filhosdoreibjj.onrender.com/%'
    OR video_url LIKE 'http://api.filhosdoreibjj.com/%';
+UPDATE techniques
+SET video_url = ''
+WHERE video_url IS NOT NULL
+  AND video_url <> ''
+  AND video_url !~ '^(https?://|/api/techniques/video/)';
 
 CREATE TABLE IF NOT EXISTS technique_videos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

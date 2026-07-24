@@ -2001,12 +2001,15 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
   }, [activeCategory, searchTerm, techniques]);
   const selectedTechnique =
     filteredTechniques.find((technique) => technique.id === selectedTechniqueId) ??
-    filteredTechniques.find((technique) => technique.video_url) ??
+    filteredTechniques.find((technique) => hasPlayableTechniqueVideo(technique.video_url)) ??
     filteredTechniques[0] ??
     null;
+  const selectedVideoKind = techniqueVideoKind(selectedTechnique?.video_url);
+  const selectedMediaUrl = selectedTechnique?.video_url ? mediaUrl(selectedTechnique.video_url) : "";
+  const selectedYoutubeEmbedUrl = selectedVideoKind === "youtube" ? youtubeEmbedUrl(selectedMediaUrl) : "";
   const stats = {
     total: techniques.length,
-    videos: techniques.filter((technique) => technique.video_url).length,
+    videos: techniques.filter((technique) => hasPlayableTechniqueVideo(technique.video_url)).length,
     learned: techniques.filter((technique) => technique.status === "learned").length,
     developing: techniques.filter((technique) => technique.status === "developing").length
   };
@@ -2197,6 +2200,8 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
                 {filteredTechniques.length === 0 && <EmptyState>Nenhuma técnica encontrada com esse filtro.</EmptyState>}
                 {filteredTechniques.map((technique) => {
                   const isSelected = selectedTechnique?.id === technique.id;
+                  const itemVideoKind = techniqueVideoKind(technique.video_url);
+                  const itemHasPlayableVideo = itemVideoKind === "mp4" || itemVideoKind === "youtube" || itemVideoKind === "external";
                   return (
                     <div
                       key={technique.id}
@@ -2209,14 +2214,15 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
                           <div className="flex flex-wrap items-center gap-2">
                             <h4 className="font-bold text-white">{technique.name}</h4>
                             {techniqueBadge(technique.status)}
-                            {technique.video_url && <Badge tone="gold">Vídeo</Badge>}
+                            {itemHasPlayableVideo && <Badge tone="gold">{itemVideoKind === "youtube" ? "YouTube" : "Vídeo"}</Badge>}
+                            {itemVideoKind === "invalid" && <Badge tone="red">Link inválido</Badge>}
                           </div>
                           <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-royal-gold/80">{technique.category}</p>
                           {technique.description && <p className="mt-2 line-clamp-2 text-sm leading-6 text-zinc-300">{technique.description}</p>}
                           {technique.notes && <p className="mt-2 line-clamp-2 text-sm text-royal-muted">Obs: {technique.notes}</p>}
                         </button>
                         <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
-                          {technique.video_url && (
+                          {itemHasPlayableVideo && (
                             <Button variant={isSelected ? "primary" : "ghost"} className="min-h-8 px-3 text-xs" onClick={() => openTechniqueVideo(technique)}>
                               <Eye size={14} /> Assistir
                             </Button>
@@ -2252,12 +2258,12 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
               <Card>
                 <p className="section-kicker">Mostruário</p>
                 <h3 className="mt-1 text-lg font-black text-white">{selectedTechnique?.name ?? "Selecione uma técnica"}</h3>
-                {selectedTechnique?.video_url ? (
+                {selectedTechnique && selectedVideoKind === "mp4" ? (
                   <div className="mt-4 overflow-hidden rounded-lg border border-royal-line bg-black/45">
                     <video
                       key={selectedTechnique.id}
                       className="aspect-video w-full bg-black object-contain"
-                      src={mediaUrl(selectedTechnique.video_url)}
+                      src={selectedMediaUrl}
                       controls
                       playsInline
                       preload="metadata"
@@ -2267,15 +2273,41 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
                     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
                       <span className="text-xs font-semibold text-royal-muted">{selectedTechnique.category}</span>
                       <div className="flex flex-wrap gap-3">
-                        <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={mediaUrl(selectedTechnique.video_url)} target="_blank" rel="noreferrer">
+                        <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={selectedMediaUrl} target="_blank" rel="noreferrer">
                           <Eye size={14} /> Abrir vídeo
                         </a>
-                        <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={mediaUrl(selectedTechnique.video_url)} download target="_blank" rel="noreferrer">
+                        <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={selectedMediaUrl} download target="_blank" rel="noreferrer">
                           <Download size={14} /> Baixar MP4
                         </a>
                       </div>
                     </div>
                   </div>
+                ) : selectedTechnique && selectedVideoKind === "youtube" && selectedYoutubeEmbedUrl ? (
+                  <div className="mt-4 overflow-hidden rounded-lg border border-royal-line bg-black/45">
+                    <iframe
+                      key={selectedTechnique.id}
+                      className="aspect-video w-full bg-black"
+                      src={selectedYoutubeEmbedUrl}
+                      title={selectedTechnique.name}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
+                      <span className="text-xs font-semibold text-royal-muted">{selectedTechnique.category}</span>
+                      <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={selectedMediaUrl} target="_blank" rel="noreferrer">
+                        <Eye size={14} /> Abrir no YouTube
+                      </a>
+                    </div>
+                  </div>
+                ) : selectedVideoKind === "external" ? (
+                  <div className="mt-4 rounded-lg border border-royal-line bg-black/30 p-4">
+                    <p className="text-sm leading-6 text-zinc-300">Esse vídeo está em um link externo. Abra em uma nova aba para assistir.</p>
+                    <a className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={selectedMediaUrl} target="_blank" rel="noreferrer">
+                      <Eye size={14} /> Abrir vídeo
+                    </a>
+                  </div>
+                ) : selectedVideoKind === "invalid" ? (
+                  <EmptyState>O link salvo para essa técnica não é válido. Edite a técnica e envie um MP4 ou informe uma URL completa.</EmptyState>
                 ) : (
                   <EmptyState>{selectedTechnique ? "Essa técnica ainda não tem vídeo cadastrado." : "Selecione uma técnica da lista para ver o vídeo."}</EmptyState>
                 )}
@@ -3127,6 +3159,42 @@ function mediaUrl(value?: string | null) {
   if (/^(https?:|data:|blob:)/.test(value)) return value;
   const apiOrigin = API_URL.replace(/\/api\/?$/, "");
   return `${apiOrigin}${value.startsWith("/") ? value : `/${value}`}`;
+}
+
+function techniqueVideoKind(value?: string | null) {
+  const raw = value?.trim();
+  if (!raw) return "none";
+  if (/^(data:video\/|blob:)/.test(raw)) return "mp4";
+  if (raw.startsWith("/api/techniques/video/")) return "mp4";
+  if (!/^https?:\/\//.test(raw)) return "invalid";
+
+  const normalized = mediaUrl(raw);
+  if (youtubeEmbedUrl(normalized)) return "youtube";
+  if (/\.mp4($|\?)/i.test(normalized) || normalized.includes("/api/techniques/video/")) return "mp4";
+  return "external";
+}
+
+function hasPlayableTechniqueVideo(value?: string | null) {
+  const kind = techniqueVideoKind(value);
+  return kind === "mp4" || kind === "youtube" || kind === "external";
+}
+
+function youtubeEmbedUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, "");
+    let id = "";
+    if (host === "youtu.be") id = url.pathname.split("/").filter(Boolean)[0] ?? "";
+    if (host === "youtube.com" || host === "m.youtube.com") {
+      if (url.pathname === "/watch") id = url.searchParams.get("v") ?? "";
+      if (url.pathname.startsWith("/shorts/") || url.pathname.startsWith("/embed/")) {
+        id = url.pathname.split("/").filter(Boolean)[1] ?? "";
+      }
+    }
+    return id ? `https://www.youtube.com/embed/${id}` : "";
+  } catch {
+    return "";
+  }
 }
 
 function currentMonthValue() {
