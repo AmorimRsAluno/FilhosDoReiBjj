@@ -1531,14 +1531,13 @@ app.post("/api/techniques/video", requireAuth, requireRole(["admin", "teacher"])
     return res.status(400).json({ message: "Envie um video de ate 50 MB." });
   }
 
-  const protocol = String(req.headers["x-forwarded-proto"] ?? req.protocol).split(",")[0];
   const result = await query<{ id: string }>(
     `INSERT INTO technique_videos (original_name, mime_type, content, size_bytes)
      VALUES ($1, 'video/mp4', $2, $3)
      RETURNING id`,
     [parsed.data.fileName, buffer, buffer.length]
   );
-  const videoUrl = `${protocol}://${req.get("host")}/api/techniques/video/${result.rows[0].id}/file`;
+  const videoUrl = `/api/techniques/video/${result.rows[0].id}/file`;
   res.status(201).json({ videoUrl, originalName: parsed.data.fileName });
 });
 

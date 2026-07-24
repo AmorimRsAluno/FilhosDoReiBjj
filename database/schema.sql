@@ -235,6 +235,10 @@ CREATE TABLE IF NOT EXISTS techniques (
 
 ALTER TABLE techniques ADD COLUMN IF NOT EXISTS video_url TEXT;
 ALTER TABLE techniques ADD COLUMN IF NOT EXISTS notes TEXT;
+UPDATE techniques
+SET video_url = regexp_replace(video_url, '^http://', 'https://')
+WHERE video_url LIKE 'http://filhosdoreibjj.onrender.com/%'
+   OR video_url LIKE 'http://api.filhosdoreibjj.com/%';
 
 CREATE TABLE IF NOT EXISTS technique_videos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

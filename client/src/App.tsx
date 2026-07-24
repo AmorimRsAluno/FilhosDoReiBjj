@@ -3123,6 +3123,7 @@ function videoFileToDataUrl(file: File) {
 
 function mediaUrl(value?: string | null) {
   if (!value) return "";
+  if (/^http:\/\//.test(value) && window.location.protocol === "https:") return value.replace(/^http:\/\//, "https://");
   if (/^(https?:|data:|blob:)/.test(value)) return value;
   const apiOrigin = API_URL.replace(/\/api\/?$/, "");
   return `${apiOrigin}${value.startsWith("/") ? value : `/${value}`}`;
