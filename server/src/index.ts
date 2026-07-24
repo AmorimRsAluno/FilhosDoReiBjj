@@ -1552,9 +1552,33 @@ app.get("/api/techniques/video/:id/file", async (req, res) => {
   const video = result.rows[0];
   if (!video) return res.status(404).json({ message: "Video nao encontrado." });
 
+  const safeName = encodeURIComponent(video.original_name);
+  const contentLength = Number(video.size_bytes);
+  const range = req.headers.range;
+  res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Content-Type", video.mime_type);
-  res.setHeader("Content-Length", String(video.size_bytes));
-  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(video.original_name)}"`);
+  res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
+  res.setHeader("Cache-Control", "public, max-age=86400");
+
+  if (range) {
+    const match = range.match(/bytes=(\d*)-(\d*)/);
+    if (!match) return res.status(416).end();
+
+    const start = match[1] ? Number(match[1]) : 0;
+    const end = match[2] ? Number(match[2]) : contentLength - 1;
+    if (start >= contentLength || end >= contentLength || start > end) {
+      res.setHeader("Content-Range", `bytes */${contentLength}`);
+      return res.status(416).end();
+    }
+
+    const chunk = video.content.subarray(start, end + 1);
+    res.status(206);
+    res.setHeader("Content-Range", `bytes ${start}-${end}/${contentLength}`);
+    res.setHeader("Content-Length", String(chunk.length));
+    return res.end(chunk);
+  }
+
+  res.setHeader("Content-Length", String(contentLength));
   res.end(video.content);
 });
 

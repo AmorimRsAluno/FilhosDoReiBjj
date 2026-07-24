@@ -37,7 +37,7 @@ import {
   UserRound,
   Users
 } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   type AdminDashboard,
   type AdminUser,
@@ -1987,6 +1987,8 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
   const [searchTerm, setSearchTerm] = useState("");
   const [activeCategory, setActiveCategory] = useState("Todas");
   const [selectedTechniqueId, setSelectedTechniqueId] = useState("");
+  const [videoLoadMessage, setVideoLoadMessage] = useState("");
+  const showcaseRef = useRef<HTMLDivElement>(null);
   const techniques = data ?? [];
   const categories = useMemo(() => ["Todas", ...Array.from(new Set(techniques.map((item) => item.category))).sort()], [techniques]);
   const filteredTechniques = useMemo(() => {
@@ -2017,12 +2019,22 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
     if (!categories.includes(activeCategory)) setActiveCategory("Todas");
   }, [activeCategory, categories]);
 
+  useEffect(() => {
+    setVideoLoadMessage("");
+  }, [selectedTechnique?.id]);
+
   async function updateStatus(techniqueId: string, status: Technique["status"]) {
     await request(`/techniques/${techniqueId}/status`, token, {
       method: "PATCH",
       body: JSON.stringify({ studentId, status })
     });
     reload();
+  }
+
+  function openTechniqueVideo(technique: Technique) {
+    setSelectedTechniqueId(technique.id);
+    setVideoLoadMessage("");
+    window.setTimeout(() => showcaseRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
   async function uploadTechniqueVideo(event: React.ChangeEvent<HTMLInputElement>) {
@@ -2038,8 +2050,19 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
         method: "POST",
         body: JSON.stringify({ fileName: file.name, dataUrl })
       });
-      setTechniqueForm((current) => ({ ...current, videoUrl: result.videoUrl }));
-      setVideoMessage("Vídeo MP4 enviado e vinculado à técnica.");
+      const nextForm = { ...techniqueForm, videoUrl: result.videoUrl };
+      setTechniqueForm(nextForm);
+      if (editingTechniqueId && nextForm.name.trim() && nextForm.category.trim()) {
+        const saved = await request<Technique>(`/techniques/${editingTechniqueId}`, token, {
+          method: "PUT",
+          body: JSON.stringify(nextForm)
+        });
+        setSelectedTechniqueId(saved.id);
+        setVideoMessage("Vídeo MP4 enviado, salvo e pronto para assistir.");
+        reload();
+      } else {
+        setVideoMessage("Vídeo MP4 enviado. Clique em Adicionar ou Salvar para ele aparecer no mostruário.");
+      }
     } catch (err) {
       setVideoMessage(err instanceof Error ? err.message : "Não foi possível enviar o vídeo.");
     } finally {
@@ -2049,10 +2072,11 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
 
   async function saveTechnique(event: React.FormEvent) {
     event.preventDefault();
-    await request(editingTechniqueId ? `/techniques/${editingTechniqueId}` : "/techniques", token, {
+    const saved = await request<Technique>(editingTechniqueId ? `/techniques/${editingTechniqueId}` : "/techniques", token, {
       method: editingTechniqueId ? "PUT" : "POST",
       body: JSON.stringify(techniqueForm)
     });
+    setSelectedTechniqueId(saved.id);
     setEditingTechniqueId("");
     setTechniqueForm({ category: "Guarda Fechada", name: "", description: "", videoUrl: "", notes: "" });
     setVideoMessage("");
@@ -2193,7 +2217,7 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
                         </button>
                         <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
                           {technique.video_url && (
-                            <Button variant={isSelected ? "primary" : "ghost"} className="min-h-8 px-3 text-xs" onClick={() => setSelectedTechniqueId(technique.id)}>
+                            <Button variant={isSelected ? "primary" : "ghost"} className="min-h-8 px-3 text-xs" onClick={() => openTechniqueVideo(technique)}>
                               <Eye size={14} /> Assistir
                             </Button>
                           )}
@@ -2224,29 +2248,46 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
               </div>
             </Card>
 
-            <Card className="xl:sticky xl:top-4 xl:self-start">
-              <p className="section-kicker">Mostruário</p>
-              <h3 className="mt-1 text-lg font-black text-white">{selectedTechnique?.name ?? "Selecione uma técnica"}</h3>
-              {selectedTechnique?.video_url ? (
-                <div className="mt-4 overflow-hidden rounded-lg border border-royal-line bg-black/45">
-                  <video className="aspect-video w-full bg-black object-contain" src={mediaUrl(selectedTechnique.video_url)} controls preload="metadata" />
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
-                    <span className="text-xs font-semibold text-royal-muted">{selectedTechnique.category}</span>
-                    <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={mediaUrl(selectedTechnique.video_url)} download target="_blank" rel="noreferrer">
-                      <Download size={14} /> Baixar MP4
-                    </a>
+            <div ref={showcaseRef} className="xl:sticky xl:top-4 xl:self-start">
+              <Card>
+                <p className="section-kicker">Mostruário</p>
+                <h3 className="mt-1 text-lg font-black text-white">{selectedTechnique?.name ?? "Selecione uma técnica"}</h3>
+                {selectedTechnique?.video_url ? (
+                  <div className="mt-4 overflow-hidden rounded-lg border border-royal-line bg-black/45">
+                    <video
+                      key={selectedTechnique.id}
+                      className="aspect-video w-full bg-black object-contain"
+                      src={mediaUrl(selectedTechnique.video_url)}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      onLoadedMetadata={() => setVideoLoadMessage("Vídeo carregado. Toque em play para assistir.")}
+                      onError={() => setVideoLoadMessage("Não foi possível carregar o vídeo no player. Use Abrir vídeo ou Baixar MP4.")}
+                    />
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
+                      <span className="text-xs font-semibold text-royal-muted">{selectedTechnique.category}</span>
+                      <div className="flex flex-wrap gap-3">
+                        <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={mediaUrl(selectedTechnique.video_url)} target="_blank" rel="noreferrer">
+                          <Eye size={14} /> Abrir vídeo
+                        </a>
+                        <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={mediaUrl(selectedTechnique.video_url)} download target="_blank" rel="noreferrer">
+                          <Download size={14} /> Baixar MP4
+                        </a>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <EmptyState>{selectedTechnique ? "Essa técnica ainda não tem vídeo cadastrado." : "Selecione uma técnica da lista para ver o vídeo."}</EmptyState>
-              )}
-              {selectedTechnique && (
-                <div className="mt-4 space-y-2 text-sm leading-6 text-zinc-300">
-                  {selectedTechnique.description && <p>{selectedTechnique.description}</p>}
-                  {selectedTechnique.notes && <p className="text-royal-muted">Obs: {selectedTechnique.notes}</p>}
-                </div>
-              )}
-            </Card>
+                ) : (
+                  <EmptyState>{selectedTechnique ? "Essa técnica ainda não tem vídeo cadastrado." : "Selecione uma técnica da lista para ver o vídeo."}</EmptyState>
+                )}
+                {videoLoadMessage && <p className="mt-3 text-sm font-semibold text-royal-gold">{videoLoadMessage}</p>}
+                {selectedTechnique && (
+                  <div className="mt-4 space-y-2 text-sm leading-6 text-zinc-300">
+                    {selectedTechnique.description && <p>{selectedTechnique.description}</p>}
+                    {selectedTechnique.notes && <p className="text-royal-muted">Obs: {selectedTechnique.notes}</p>}
+                  </div>
+                )}
+              </Card>
+            </div>
           </div>
         </>
       )}
