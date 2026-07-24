@@ -1507,7 +1507,8 @@ app.patch(
 );
 
 app.get("/api/techniques", requireAuth, async (req, res) => {
-  const studentId = await resolveStudentId(req.user?.id, req.query.studentId);
+  const requestedStudentId = req.user?.role === "student" ? undefined : req.query.studentId;
+  const studentId = await resolveStudentId(req.user?.id, requestedStudentId);
   const result = await query(
     `SELECT t.id, t.category, t.name, t.description, t.video_url, t.notes,
       COALESCE(st.status::text, 'not_learned') AS status
@@ -1617,11 +1618,14 @@ app.post("/api/techniques", requireAuth, requireRole(["admin", "teacher"]), asyn
   res.status(201).json(result.rows[0]);
 });
 
-app.patch("/api/techniques/:id/status", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.patch("/api/techniques/:id/status", requireAuth, requireRole(["admin", "teacher", "student"]), async (req, res) => {
   const parsed = z
-    .object({ studentId: z.string().uuid(), status: z.enum(["learned", "developing", "not_learned"]) })
+    .object({ studentId: z.string().uuid().optional(), status: z.enum(["learned", "developing", "not_learned"]) })
     .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Dados inválidos." });
+
+  const studentId = req.user?.role === "student" ? await resolveStudentId(req.user.id) : parsed.data.studentId;
+  if (!studentId) return res.status(400).json({ message: "Aluno não encontrado para registrar o progresso." });
 
   const result = await query(
     `INSERT INTO student_techniques (student_id, technique_id, status)
@@ -1629,7 +1633,7 @@ app.patch("/api/techniques/:id/status", requireAuth, requireRole(["admin", "teac
      ON CONFLICT (student_id, technique_id)
      DO UPDATE SET status = EXCLUDED.status, updated_at = now()
      RETURNING *`,
-    [parsed.data.studentId, req.params.id, parsed.data.status]
+    [studentId, req.params.id, parsed.data.status]
   );
   res.json(result.rows[0]);
 });

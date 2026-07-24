@@ -2029,7 +2029,7 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
   async function updateStatus(techniqueId: string, status: Technique["status"]) {
     await request(`/techniques/${techniqueId}/status`, token, {
       method: "PATCH",
-      body: JSON.stringify({ studentId, status })
+      body: JSON.stringify(isAdmin ? { studentId, status } : { status })
     });
     reload();
   }
@@ -2108,13 +2108,25 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
       <PageTitle title="Técnicas e evolução" subtitle="Mostruário técnico, vídeos de treino e evolução do aluno" />
       {isAdmin && (
         <Card className="space-y-4">
-          <Select value={studentId} onChange={(event) => setStudentId(event.target.value)}>
-            {students.data?.map((student) => (
-              <option value={student.id} key={student.id}>
-                {student.full_name}
-              </option>
-            ))}
-          </Select>
+          <div className="grid gap-3 lg:grid-cols-[1fr_minmax(260px,360px)] lg:items-end">
+            <div>
+              <p className="section-kicker">Registro individual</p>
+              <h3 className="text-lg font-black text-white">Progresso técnico por aluno</h3>
+              <p className="mt-1 text-sm leading-6 text-royal-muted">
+                Selecione um aluno para acompanhar quais técnicas ele marcou como aprendidas, em desenvolvimento ou não aprendidas.
+              </p>
+            </div>
+            <label className="grid gap-2">
+              <span className="text-xs font-bold uppercase tracking-[0.14em] text-royal-gold">Aluno acompanhado</span>
+              <Select value={studentId} onChange={(event) => setStudentId(event.target.value)}>
+                {students.data?.map((student) => (
+                  <option value={student.id} key={student.id}>
+                    {student.full_name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          </div>
           <form className="grid gap-3 lg:grid-cols-6" onSubmit={saveTechnique}>
             <Input placeholder="Categoria" value={techniqueForm.category} onChange={(e) => setTechniqueForm({ ...techniqueForm, category: e.target.value })} required />
             <Input placeholder="Nome da técnica" value={techniqueForm.name} onChange={(e) => setTechniqueForm({ ...techniqueForm, name: e.target.value })} required />
@@ -2239,8 +2251,13 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
                           )}
                         </div>
                       </div>
-                      {isAdmin && (
-                        <div className="mt-3 flex flex-wrap gap-2 border-t border-royal-line pt-3">
+                      {isAdmin ? (
+                        <div className="mt-3 border-t border-royal-line pt-3 text-sm text-royal-muted">
+                          Registro do aluno selecionado: <span className="font-semibold text-white">{techniqueStatus(technique.status)}</span>
+                        </div>
+                      ) : (
+                        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-royal-line pt-3">
+                          <span className="mr-1 text-xs font-bold uppercase tracking-[0.12em] text-royal-gold">Meu progresso</span>
                           {(["learned", "developing", "not_learned"] as const).map((status) => (
                             <Button key={status} variant={technique.status === status ? "primary" : "ghost"} className="min-h-8 px-3 text-xs" onClick={() => updateStatus(technique.id, status)}>
                               {techniqueStatus(status)}
