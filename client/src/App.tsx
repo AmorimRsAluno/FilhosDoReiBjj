@@ -968,6 +968,7 @@ function StudentsPanel({ token }: { token: string }) {
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null);
   const activePlans = (plans.data ?? []).filter((plan) => plan.status === "active");
   const filteredStudents = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -1021,6 +1022,20 @@ function StudentsPanel({ token }: { token: string }) {
   function cancelEdit() {
     setEditingStudentId(null);
     setForm(emptyStudentForm);
+  }
+
+  async function deleteStudent(student: Student) {
+    const confirmed = window.confirm(`Excluir ${student.full_name} e remover o acesso dele ao sistema? Essa ação não pode ser desfeita.`);
+    if (!confirmed) return;
+
+    setDeletingStudentId(student.id);
+    try {
+      await request(`/students/${student.id}`, token, { method: "DELETE" });
+      if (editingStudentId === student.id) cancelEdit();
+      reload();
+    } finally {
+      setDeletingStudentId(null);
+    }
   }
 
   return (
@@ -1172,6 +1187,9 @@ function StudentsPanel({ token }: { token: string }) {
               <div className="flex flex-wrap gap-2 md:justify-end">
                 <Button variant="ghost" onClick={() => editStudent(student)}>
                   <Pencil size={16} /> Editar
+                </Button>
+                <Button variant="danger" disabled={deletingStudentId === student.id} onClick={() => deleteStudent(student)}>
+                  <Trash2 size={16} /> {deletingStudentId === student.id ? "Excluindo..." : "Excluir"}
                 </Button>
               </div>
             </Card>

@@ -815,9 +815,31 @@ app.put("/api/students-legacy-disabled/:id", requireAuth, requireRole(["admin", 
   res.json(result.rows[0]);
 });
 
-app.delete("/api/students/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
-  await query("DELETE FROM students WHERE id = $1", [req.params.id]);
-  res.status(204).end();
+app.delete("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const student = await client.query<{ user_id: string | null }>("SELECT user_id FROM students WHERE id = $1 FOR UPDATE", [req.params.id]);
+    if (!student.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Aluno não encontrado." });
+    }
+
+    const userId = student.rows[0].user_id;
+    await client.query("DELETE FROM students WHERE id = $1", [req.params.id]);
+    if (userId) {
+      await client.query("DELETE FROM users WHERE id = $1 AND role = 'student'", [userId]);
+    }
+
+    await client.query("COMMIT");
+    res.status(204).end();
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 });
 
 app.get("/api/student/dashboard", requireAuth, async (req, res) => {
