@@ -1207,6 +1207,8 @@ function StudentDashboardView({ token }: { token: string }) {
   const { data, loading, error, reload } = useApi<StudentDashboard>("/student/dashboard", token);
   const [checkinLoading, setCheckinLoading] = useState(false);
   const [checkinMessage, setCheckinMessage] = useState("");
+  const [checkinBurst, setCheckinBurst] = useState(false);
+  const [lastCheckinXp, setLastCheckinXp] = useState<number | null>(null);
   const [photoLoading, setPhotoLoading] = useState(false);
   const [photoMessage, setPhotoMessage] = useState("");
 
@@ -1215,6 +1217,12 @@ function StudentDashboardView({ token }: { token: string }) {
     const interval = window.setInterval(reload, 5000);
     return () => window.clearInterval(interval);
   }, [data?.checkin?.status, reload]);
+
+  useEffect(() => {
+    if (!checkinBurst) return;
+    const timeout = window.setTimeout(() => setCheckinBurst(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [checkinBurst]);
 
   if (loading) return <Loading title="Carregando área do aluno" />;
   if (error) return <ErrorBox message={error} />;
@@ -1233,6 +1241,27 @@ function StudentDashboardView({ token }: { token: string }) {
   const checkinWindowText = data.nextClass
     ? `Check-in liberado de ${formatDateTime(data.nextClass.checkin_start_at)} até ${formatDateTime(data.nextClass.checkin_end_at)}`
     : "";
+  const checkinRecentlyConfirmed = lastCheckinXp !== null;
+  const checkinApproved = activeCheckin?.status === "approved" || checkinRecentlyConfirmed;
+  const confirmedXp = Math.max(Number(lastCheckinXp ?? 0), Number(activeCheckin?.xp_awarded ?? 0));
+  const checkinCardClass = [
+    "training-checkin-card",
+    checkinOpen ? "is-open" : "is-closed",
+    checkinApproved ? "is-approved" : "",
+    checkinLoading ? "is-loading" : "",
+    checkinBurst ? "is-burst" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const checkinActionText = checkinLoading
+    ? "Registrando treino..."
+    : checkinApproved
+      ? "Treino confirmado"
+      : checkinOpen
+        ? "Confirmar presença"
+        : data.nextClass
+          ? "Aguardando horário"
+          : "Sem aula disponível";
 
   async function requestCheckin() {
     if (!data?.nextClass) return;
@@ -1244,11 +1273,14 @@ function StudentDashboardView({ token }: { token: string }) {
     setCheckinLoading(true);
     setCheckinMessage("");
     try {
-      await request("/student/checkins", token, {
+      const result = await request<{ xp_awarded?: number }>("/student/checkins", token, {
         method: "POST",
         body: JSON.stringify({})
       });
-      setCheckinMessage("Check-in registrado automaticamente.");
+      const xpAwarded = Number(result.xp_awarded ?? 0);
+      setLastCheckinXp(xpAwarded);
+      setCheckinBurst(true);
+      setCheckinMessage(xpAwarded > 0 ? `Presença confirmada. +${xpAwarded} XP aplicado.` : "Presença já estava confirmada para esta aula.");
       reload();
     } catch (err) {
       setCheckinMessage(err instanceof Error ? err.message : "Não foi possível enviar o check-in.");
@@ -1317,14 +1349,15 @@ function StudentDashboardView({ token }: { token: string }) {
         stripes={safeStripes}
         remaining={classesLeft}
       />
-      <Card className={activeCheckin?.status === "approved" && activeCheckin.xp_awarded > 0 ? "xp-confirmed" : ""}>
-        <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
-          <div>
+      <Card className={checkinCardClass}>
+        <div className="grid gap-5 lg:grid-cols-[1fr_300px] lg:items-center">
+          <div className="relative z-[1]">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-lg font-bold text-white">Check-in de treino</h3>
               {activeCheckin?.status === "pending" && <Badge tone="gold">Registrando</Badge>}
               {activeCheckin?.status === "approved" && <Badge tone="green">Treino validado</Badge>}
               {activeCheckin?.status === "rejected" && <Badge tone="red">Revisar com professor</Badge>}
+              {checkinOpen && !checkinApproved && <span className="checkin-live-chip"><span /> Aberto agora</span>}
             </div>
             <p className="mt-2 text-sm text-zinc-300">
               {data.nextClass
@@ -1336,9 +1369,9 @@ function StudentDashboardView({ token }: { token: string }) {
                 {checkinOpen ? "Check-in liberado agora." : "Check-in fora da janela liberada."} {checkinWindowText}
               </p>
             )}
-            {activeCheckin?.status === "approved" && activeCheckin.xp_awarded > 0 && (
-              <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-royal-gold/40 bg-royal-gold/10 px-4 py-3 text-royal-gold">
-                <SparkXp /> <span className="text-sm font-black">+{activeCheckin.xp_awarded} XP confirmado</span>
+            {checkinApproved && confirmedXp > 0 && (
+              <div className="checkin-xp-toast">
+                <SparkXp /> <span>+{confirmedXp} XP confirmado</span>
               </div>
             )}
             {activeCheckin?.status === "pending" && (
@@ -1346,12 +1379,29 @@ function StudentDashboardView({ token }: { token: string }) {
             )}
             {checkinMessage && <p className="mt-3 text-sm text-royal-gold">{checkinMessage}</p>}
           </div>
-          <Button
-            disabled={!data.nextClass || !checkinOpen || checkinLoading || activeCheckin?.status === "approved"}
-            onClick={requestCheckin}
-          >
-            <Clock size={16} /> {checkinLoading ? "Enviando..." : "Fazer check-in"}
-          </Button>
+          <div className="relative z-[1] flex flex-col gap-3">
+            <button
+              type="button"
+              className="checkin-hero-button"
+              aria-label={checkinActionText}
+              aria-busy={checkinLoading}
+              disabled={!data.nextClass || !checkinOpen || checkinLoading || checkinApproved}
+              onClick={requestCheckin}
+            >
+              <span className="checkin-hero-icon">
+                {checkinApproved ? <CheckCircle2 size={28} /> : checkinLoading ? <Sparkles size={28} /> : <CalendarCheck size={28} />}
+              </span>
+              <span>
+                <strong>{checkinActionText}</strong>
+                <small>{checkinOpen && !checkinApproved ? "+50 XP ao confirmar" : checkinApproved ? "Presença registrada" : "Volte no horário da aula"}</small>
+              </span>
+              {checkinOpen && !checkinApproved && <ArrowRight className="checkin-arrow" size={20} />}
+            </button>
+            <div className="checkin-mini-panel">
+              <Clock size={15} />
+              <span>{data.nextClass ? (checkinOpen ? "Janela liberada" : "Fora da janela") : "Sem aula ativa"}</span>
+            </div>
+          </div>
         </div>
       </Card>
       <div className="grid gap-4 xl:grid-cols-[1.25fr_.75fr]">

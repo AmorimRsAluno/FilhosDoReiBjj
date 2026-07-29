@@ -824,6 +824,188 @@ input[type="date"] {
   box-shadow: 0 0 0 0 rgba(255, 196, 15, 0.38);
 }
 
+.training-checkin-card {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255, 196, 15, 0.22);
+  background:
+    linear-gradient(135deg, rgba(255, 196, 15, 0.08), transparent 34%),
+    linear-gradient(145deg, rgba(27, 27, 27, 0.97), rgba(8, 8, 8, 0.98));
+}
+
+.training-checkin-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-top: 1px solid rgba(255, 196, 15, 0.35);
+  background: linear-gradient(90deg, transparent, rgba(255, 196, 15, 0.12), transparent);
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+
+.training-checkin-card.is-open {
+  border-color: rgba(255, 196, 15, 0.55);
+  box-shadow:
+    0 0 0 1px rgba(255, 196, 15, 0.08),
+    0 18px 56px rgba(255, 196, 15, 0.12);
+}
+
+.training-checkin-card.is-open::before {
+  animation: checkin-sweep 2300ms ease-in-out infinite;
+}
+
+.training-checkin-card.is-approved,
+.training-checkin-card.is-burst {
+  animation: checkin-confirm 900ms ease-out 1;
+  border-color: rgba(34, 197, 94, 0.42);
+}
+
+.checkin-live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(34, 197, 94, 0.38);
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.11);
+  color: #86efac;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  padding: 0.28rem 0.58rem;
+  text-transform: uppercase;
+}
+
+.checkin-live-chip span {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: #22c55e;
+  animation: checkin-dot 1200ms ease-in-out infinite;
+}
+
+.checkin-hero-button {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.95rem;
+  min-height: 6.5rem;
+  width: 100%;
+  border: 1px solid rgba(255, 196, 15, 0.58);
+  border-radius: 1rem;
+  background:
+    linear-gradient(135deg, #ffc40f, #ffdc63 52%, #f3b80b);
+  color: #050505;
+  padding: 1rem;
+  text-align: left;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    0 18px 42px rgba(255, 196, 15, 0.2);
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    filter 180ms ease;
+}
+
+.training-checkin-card.is-open:not(.is-approved) .checkin-hero-button {
+  animation: checkin-call 1600ms ease-in-out infinite;
+}
+
+.checkin-hero-button:not(:disabled):hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 22px 54px rgba(255, 196, 15, 0.28);
+  filter: saturate(1.08);
+}
+
+.checkin-hero-button:not(:disabled):active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.checkin-hero-button:disabled {
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(145deg, rgba(38, 38, 38, 0.95), rgba(12, 12, 12, 0.95));
+  color: #a1a1aa;
+  box-shadow: none;
+}
+
+.training-checkin-card.is-approved .checkin-hero-button {
+  border-color: rgba(34, 197, 94, 0.5);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.22), rgba(10, 10, 10, 0.96));
+  color: #d1fae5;
+}
+
+.checkin-hero-icon {
+  display: grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 0.85rem;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.checkin-hero-button strong,
+.checkin-hero-button small {
+  display: block;
+}
+
+.checkin-hero-button > span:nth-child(2) {
+  min-width: 0;
+}
+
+.checkin-hero-button strong {
+  font-size: clamp(1rem, 2.5vw, 1.35rem);
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.checkin-hero-button small {
+  margin-top: 0.25rem;
+  color: currentColor;
+  font-size: 0.78rem;
+  font-weight: 800;
+  opacity: 0.76;
+}
+
+.checkin-arrow {
+  transition: transform 180ms ease;
+}
+
+.checkin-hero-button:not(:disabled):hover .checkin-arrow {
+  transform: translateX(3px);
+}
+
+.checkin-mini-panel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.85rem;
+  background: rgba(0, 0, 0, 0.28);
+  color: #d4d4d8;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.checkin-xp-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  border: 1px solid rgba(255, 196, 15, 0.44);
+  border-radius: 0.85rem;
+  background: rgba(255, 196, 15, 0.1);
+  color: #ffc40f;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 950;
+  animation: checkin-toast 900ms ease-out 1;
+}
+
 @keyframes xp-card {
   0% {
     border-color: rgba(255, 196, 15, 0.9);
@@ -845,6 +1027,61 @@ input[type="date"] {
   }
   100% {
     transform: scale(1);
+  }
+}
+
+@keyframes checkin-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  52%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes checkin-call {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes checkin-dot {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.34);
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+  }
+}
+
+@keyframes checkin-confirm {
+  0% {
+    transform: translateY(2px);
+  }
+  45% {
+    transform: translateY(-2px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes checkin-toast {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
