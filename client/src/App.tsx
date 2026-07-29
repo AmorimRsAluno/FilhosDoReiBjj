@@ -676,6 +676,7 @@ function UserPermissionCard({ token, user, onSaved }: { token: string; user: Adm
     permissions: user.permissions ?? []
   });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   function togglePermission(permission: string) {
     const permissions = form.permissions.includes(permission)
@@ -694,6 +695,19 @@ function UserPermissionCard({ token, user, onSaved }: { token: string; user: Adm
       onSaved();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteStudentUser() {
+    const confirmed = window.confirm(`Excluir o usuário ${user.name} e remover o aluno vinculado? Essa ação não pode ser desfeita.`);
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      await request(`/admin/users/${user.id}`, token, { method: "DELETE" });
+      onSaved();
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -727,9 +741,16 @@ function UserPermissionCard({ token, user, onSaved }: { token: string; user: Adm
       </div>
       <div className="mt-4 flex items-center justify-between gap-3">
         <Badge tone="gold">{roleLabel(form.role)}</Badge>
-        <Button disabled={saving} onClick={save}>
-          <Save size={16} /> {saving ? "Salvando..." : "Salvar permissões"}
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          {user.role === "student" && (
+            <Button variant="danger" disabled={deleting} onClick={deleteStudentUser}>
+              <Trash2 size={16} /> {deleting ? "Excluindo..." : "Excluir aluno"}
+            </Button>
+          )}
+          <Button disabled={saving} onClick={save}>
+            <Save size={16} /> {saving ? "Salvando..." : "Salvar permissões"}
+          </Button>
+        </div>
       </div>
     </Card>
   );
@@ -968,7 +989,6 @@ function StudentsPanel({ token }: { token: string }) {
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null);
   const activePlans = (plans.data ?? []).filter((plan) => plan.status === "active");
   const filteredStudents = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -1022,20 +1042,6 @@ function StudentsPanel({ token }: { token: string }) {
   function cancelEdit() {
     setEditingStudentId(null);
     setForm(emptyStudentForm);
-  }
-
-  async function deleteStudent(student: Student) {
-    const confirmed = window.confirm(`Excluir ${student.full_name} e remover o acesso dele ao sistema? Essa ação não pode ser desfeita.`);
-    if (!confirmed) return;
-
-    setDeletingStudentId(student.id);
-    try {
-      await request(`/students/${student.id}`, token, { method: "DELETE" });
-      if (editingStudentId === student.id) cancelEdit();
-      reload();
-    } finally {
-      setDeletingStudentId(null);
-    }
   }
 
   return (
@@ -1188,9 +1194,6 @@ function StudentsPanel({ token }: { token: string }) {
                 <Button variant="ghost" onClick={() => editStudent(student)}>
                   <Pencil size={16} /> Editar
                 </Button>
-                <Button variant="danger" disabled={deletingStudentId === student.id} onClick={() => deleteStudent(student)}>
-                  <Trash2 size={16} /> {deletingStudentId === student.id ? "Excluindo..." : "Excluir"}
-                </Button>
               </div>
             </Card>
           ))}
@@ -1333,9 +1336,6 @@ function StudentDashboardView({ token }: { token: string }) {
                 {checkinOpen ? "Check-in liberado agora." : "Check-in fora da janela liberada."} {checkinWindowText}
               </p>
             )}
-            {data.nextClass?.plan_names?.length ? (
-              <p className="mt-1 text-xs text-royal-muted">Planos desta aula: {data.nextClass.plan_names.join(", ")}</p>
-            ) : null}
             {activeCheckin?.status === "approved" && activeCheckin.xp_awarded > 0 && (
               <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-royal-gold/40 bg-royal-gold/10 px-4 py-3 text-royal-gold">
                 <SparkXp /> <span className="text-sm font-black">+{activeCheckin.xp_awarded} XP confirmado</span>

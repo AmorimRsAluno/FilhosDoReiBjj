@@ -477,6 +477,38 @@ app.patch("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (re
   }
 });
 
+app.delete("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+  if (req.user?.id === req.params.id) {
+    return res.status(400).json({ message: "Não é possível excluir o próprio usuário logado." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const user = await client.query<{ role: string }>("SELECT role::text FROM users WHERE id = $1 FOR UPDATE", [req.params.id]);
+    if (!user.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Usuário não encontrado." });
+    }
+    if (user.rows[0].role !== "student") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Somente usuários de alunos podem ser excluídos por esta ação." });
+    }
+
+    await client.query("DELETE FROM students WHERE user_id = $1", [req.params.id]);
+    await client.query("DELETE FROM users WHERE id = $1 AND role = 'student'", [req.params.id]);
+
+    await client.query("COMMIT");
+    res.status(204).end();
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
 app.get(
   "/api/admin/dashboard",
   requireAuth,
@@ -872,7 +904,7 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
     query(
       `SELECT
         CONCAT('schedule-', mp.id::text) AS id,
-        CONCAT('Aula ', mp.name) AS title,
+        'Aula de Jiu-Jitsu' AS title,
         (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_start_time) AT TIME ZONE 'America/Sao_Paulo') AS class_date,
         'Check-in automatico do plano' AS focus,
         (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_start_time) AT TIME ZONE 'America/Sao_Paulo') AS checkin_start_at,
@@ -880,8 +912,7 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
         (
           EXTRACT(DOW FROM now() AT TIME ZONE 'America/Sao_Paulo')::int = ANY(mp.checkin_days)
           AND (now() AT TIME ZONE 'America/Sao_Paulo')::time BETWEEN mp.checkin_start_time AND mp.checkin_end_time
-        ) AS checkin_open,
-        ARRAY[mp.name] AS plan_names
+        ) AS checkin_open
        FROM membership_plans mp
        WHERE mp.id = $1 AND mp.status = 'active'
          AND EXTRACT(DOW FROM now() AT TIME ZONE 'America/Sao_Paulo')::int = ANY(mp.checkin_days)
@@ -910,7 +941,9 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
     ),
     query(
       `SELECT tc.id, tc.status, tc.requested_at, tc.reviewed_at, tc.xp_awarded,
-        c.id AS class_id, c.title, c.class_date, c.focus
+        c.id AS class_id,
+        CASE WHEN c.auto_plan_id IS NOT NULL THEN 'Aula de Jiu-Jitsu' ELSE c.title END AS title,
+        c.class_date, c.focus
        FROM training_checkins tc
        JOIN classes c ON c.id = tc.class_id
        WHERE tc.student_id = $1
@@ -1006,7 +1039,7 @@ app.post("/api/student/checkins", requireAuth, async (req, res, next) => {
                      focus = EXCLUDED.focus
        RETURNING id, title, class_date, focus, checkin_start_at, checkin_end_at`,
       [
-        `Aula ${schedule.plan_name}`,
+        "Aula de Jiu-Jitsu",
         "Check-in automatico do plano",
         schedule.class_date,
         schedule.checkin_start_at,
@@ -1194,7 +1227,7 @@ app.post("/api/student/finance/advance", requireAuth, requireRole(["student"]), 
     const dueDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + index, Number(plan.due_day ?? 10));
     const dueDateText = dueDate.toISOString().slice(0, 10);
     const month = referenceMonth(dueDateText);
-    const pixCode = `PIX ${plan.plan_name} ${studentId.slice(0, 8)} ${month}`;
+    const pixCode = `PIX Mensalidade ${studentId.slice(0, 8)} ${month}`;
     const inserted = await query(
       `INSERT INTO payments (student_id, reference_month, due_date, value, status, pix_code)
        SELECT $1, $2, $3::date, $4, 'pending', $5
@@ -2284,7 +2317,7 @@ async function syncMembershipPayment(client: Pick<typeof pool, "query">, student
 
   const dueDate = billingDueDate || nextDueDate(Number(plan.due_day ?? 10));
   const month = referenceMonth(dueDate);
-  const pixCode = `PIX ${plan.name} ${studentId.slice(0, 8)} ${month}`;
+  const pixCode = `PIX Mensalidade ${studentId.slice(0, 8)} ${month}`;
   const latestPending = await client.query<{ id: string }>(
     "SELECT id FROM payments WHERE student_id = $1 AND status = 'pending' ORDER BY due_date DESC LIMIT 1",
     [studentId]
