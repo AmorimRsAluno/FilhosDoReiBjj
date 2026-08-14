@@ -80,6 +80,11 @@ const isTechniqueVideoUrl = (value?: string) => {
   return !trimmed || /^https?:\/\//.test(trimmed) || trimmed.startsWith("/api/techniques/video/");
 };
 
+const isProductImageUrl = (value?: string) => {
+  const trimmed = value?.trim() ?? "";
+  return !trimmed || /^https?:\/\//.test(trimmed) || trimmed.startsWith("/api/products/image/");
+};
+
 const nullableText = z.string().optional().or(z.literal(""));
 const planPayloadSchema = z.object({
   name: z.string().min(3),
@@ -2071,6 +2076,62 @@ app.get("/api/products", requireAuth, async (_req, res) => {
   res.json(result.rows);
 });
 
+app.post("/api/products/image", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+  const parsed = z
+    .object({
+      fileName: z.string().min(1).max(180),
+      dataUrl: z.string().max(15_000_000)
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Imagem inválida." });
+
+  const match = parsed.data.dataUrl.match(/^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return res.status(400).json({ message: "Envie uma imagem PNG, JPG ou WEBP válida." });
+
+  const mimeType = `image/${match[1] === "jpg" ? "jpeg" : match[1]}`;
+  const buffer = Buffer.from(match[2], "base64");
+  if (buffer.length > 8 * 1024 * 1024) {
+    return res.status(400).json({ message: "Envie uma imagem de até 8 MB." });
+  }
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS product_images (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      original_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      content BYTEA NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`
+  );
+
+  const result = await query<{ id: string }>(
+    `INSERT INTO product_images (original_name, mime_type, content, size_bytes)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id`,
+    [parsed.data.fileName, mimeType, buffer, buffer.length]
+  );
+  const imageUrl = `/api/products/image/${result.rows[0].id}/file`;
+  res.status(201).json({ imageUrl, originalName: parsed.data.fileName });
+});
+
+app.get("/api/products/image/:id/file", async (req, res) => {
+  const result = await query<{
+    original_name: string;
+    mime_type: string;
+    content: Buffer;
+    size_bytes: number;
+  }>("SELECT original_name, mime_type, content, size_bytes FROM product_images WHERE id = $1", [req.params.id]);
+  const image = result.rows[0];
+  if (!image) return res.status(404).json({ message: "Imagem não encontrada." });
+
+  res.setHeader("Content-Type", image.mime_type);
+  res.setHeader("Content-Length", String(Number(image.size_bytes)));
+  res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(image.original_name)}"`);
+  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.end(image.content);
+});
+
 app.post("/api/products", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   const parsed = z
     .object({
@@ -2078,12 +2139,13 @@ app.post("/api/products", requireAuth, requireRole(["admin", "teacher"]), async 
       category: z.string().min(2),
       price: z.coerce.number().positive(),
       stock: z.coerce.number().int().min(0),
-      imageUrl: z.string().url().optional().or(z.literal("")),
+      imageUrl: z.string().max(2048).optional().or(z.literal("")),
       available: z.boolean().default(true)
     })
     .safeParse(req.body);
 
   if (!parsed.success) return res.status(400).json({ message: "Produto inválido." });
+  if (!isProductImageUrl(parsed.data.imageUrl)) return res.status(400).json({ message: "Informe uma URL de imagem válida ou envie uma imagem." });
 
   const result = await query(
     `INSERT INTO products (name, category, price, stock, image_url, available, pix_code)
@@ -2109,12 +2171,13 @@ app.put("/api/products/:id", requireAuth, requireRole(["admin", "teacher"]), asy
       category: z.string().min(2),
       price: z.coerce.number().positive(),
       stock: z.coerce.number().int().min(0),
-      imageUrl: z.string().url().optional().or(z.literal("")),
+      imageUrl: z.string().max(2048).optional().or(z.literal("")),
       available: z.boolean().default(true)
     })
     .safeParse(req.body);
 
   if (!parsed.success) return res.status(400).json({ message: "Produto inválido." });
+  if (!isProductImageUrl(parsed.data.imageUrl)) return res.status(400).json({ message: "Informe uma URL de imagem válida ou envie uma imagem." });
 
   const result = await query(
     `UPDATE products

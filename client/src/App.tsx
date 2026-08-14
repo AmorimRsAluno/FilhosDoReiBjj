@@ -2822,6 +2822,8 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
   const [saleQuantities, setSaleQuantities] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [form, setForm] = useState({ name: "", category: "Kimono", price: "", stock: "", imageUrl: "", available: true });
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageMessage, setImageMessage] = useState("");
 
   async function createProduct(event: React.FormEvent) {
     event.preventDefault();
@@ -2831,6 +2833,7 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
     });
     setEditingProductId("");
     setForm({ name: "", category: "Kimono", price: "", stock: "", imageUrl: "", available: true });
+    setImageMessage("");
     reload();
   }
 
@@ -2844,6 +2847,40 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
       imageUrl: product.image_url ?? "",
       available: product.available
     });
+    setImageMessage("");
+  }
+
+  async function uploadProductImage(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+
+    setUploadingImage(true);
+    setImageMessage("");
+    try {
+      const dataUrl = await productImageFileToDataUrl(file);
+      const result = await request<{ imageUrl: string }>("/products/image", token, {
+        method: "POST",
+        body: JSON.stringify({ fileName: file.name, dataUrl })
+      });
+      const nextForm = { ...form, imageUrl: result.imageUrl };
+      setForm(nextForm);
+
+      if (editingProductId && nextForm.name.trim() && nextForm.price && nextForm.stock) {
+        await request(`/products/${editingProductId}`, token, {
+          method: "PUT",
+          body: JSON.stringify({ ...nextForm, price: Number(nextForm.price), stock: Number(nextForm.stock) })
+        });
+        setImageMessage("Imagem enviada, salva e aplicada ao produto.");
+        reload();
+      } else {
+        setImageMessage("Imagem enviada. Clique em Produto ou Salvar para aplicar na loja.");
+      }
+    } catch (err) {
+      setImageMessage(err instanceof Error ? err.message : "Não foi possível enviar a imagem.");
+    } finally {
+      setUploadingImage(false);
+    }
   }
 
   async function updateAvailability(product: Product, available: boolean, stock?: number) {
@@ -2887,14 +2924,19 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
             </Select>
             <Input placeholder="Preço" type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} required />
             <Input placeholder="Estoque" type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} required />
-            <Input placeholder="Imagem URL" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} />
+            <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-royal-gold/40 bg-royal-gold/10 px-4 text-sm font-semibold text-royal-gold transition hover:bg-royal-gold/15">
+              <Upload size={16} /> {uploadingImage ? "Enviando..." : "Enviar imagem"}
+              <input className="hidden" type="file" accept="image/png,image/jpeg,image/webp" disabled={uploadingImage} onChange={uploadProductImage} />
+            </label>
             <Button>
               <Save size={16} /> {editingProductId ? "Salvar" : "Produto"}
             </Button>
+            <Input className="md:col-span-3" placeholder="Link da imagem ou imagem enviada" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} />
             <Select className="md:col-span-2" value={String(form.available)} onChange={(e) => setForm({ ...form, available: e.target.value === "true" })}>
               <option value="true">Disponível</option>
               <option value="false">Indisponível</option>
             </Select>
+            {imageMessage && <p className="text-sm font-semibold text-royal-gold md:col-span-6">{imageMessage}</p>}
             {editingProductId && (
               <Button
                 type="button"
@@ -2902,6 +2944,7 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
                 onClick={() => {
                   setEditingProductId("");
                   setForm({ name: "", category: "Kimono", price: "", stock: "", imageUrl: "", available: true });
+                  setImageMessage("");
                 }}
               >
                 Cancelar edição
@@ -2916,7 +2959,7 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {data?.map((product) => (
           <Card key={product.id} className="overflow-hidden p-0">
-            <img className="h-48 w-full object-cover" src={product.image_url || "/icon.svg"} alt="" />
+            <img className="h-48 w-full object-cover" src={product.image_url ? mediaUrl(product.image_url) : "/icon.svg"} alt={product.name} />
             <div className="p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -3397,6 +3440,63 @@ function imageFileToProfileDataUrl(file: File) {
         },
         "image/jpeg",
         0.86
+      );
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Não foi possível abrir a imagem."));
+    };
+
+    image.src = objectUrl;
+  });
+}
+
+function productImageFileToDataUrl(file: File) {
+  if (!file.type.startsWith("image/")) {
+    return Promise.reject(new Error("Selecione uma imagem PNG, JPG ou WEBP."));
+  }
+
+  if (file.size > 8 * 1024 * 1024) {
+    return Promise.reject(new Error("Escolha uma imagem de até 8 MB."));
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      const maxSize = 1400;
+      const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Não foi possível preparar a imagem."));
+        return;
+      }
+
+      context.drawImage(image, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          URL.revokeObjectURL(objectUrl);
+          if (!blob) {
+            reject(new Error("Não foi possível preparar a imagem."));
+            return;
+          }
+
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error("Não foi possível ler a imagem."));
+          reader.readAsDataURL(blob);
+        },
+        file.type === "image/png" ? "image/png" : "image/jpeg",
+        0.9
       );
     };
 
