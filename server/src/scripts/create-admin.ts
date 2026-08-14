@@ -5,7 +5,7 @@ async function main() {
   const name = process.env.INITIAL_ADMIN_NAME ?? "Admin";
   const username = process.env.INITIAL_ADMIN_USERNAME ?? "Admin";
   const email = (process.env.INITIAL_ADMIN_EMAIL ?? "admin@filhosdorei.local").toLowerCase();
-  const password = process.env.INITIAL_ADMIN_PASSWORD ?? "Admin@2026";
+  const password = process.env.INITIAL_ADMIN_PASSWORD ?? (process.env.NODE_ENV === "production" ? "" : "Admin@2026");
 
   if (!email || !password || password.length < 8) {
     throw new Error("Configure INITIAL_ADMIN_EMAIL e INITIAL_ADMIN_PASSWORD com pelo menos 8 caracteres.");

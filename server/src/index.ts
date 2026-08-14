@@ -10,6 +10,9 @@ import { pool, query } from "./db.js";
 import { requireAuth, requireRole, signToken } from "./middleware/auth.js";
 
 const app = express();
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+
 const port = Number(process.env.PORT ?? 3333);
 const defaultCorsOrigins = [
   "https://filhos-do-rei-bjj-client.vercel.app",
@@ -26,6 +29,50 @@ const corsOrigins = Array.from(
   ])
 );
 
+type RateBucket = { count: number; resetAt: number };
+const rateBuckets = new Map<string, RateBucket>();
+
+function rateLimit(options: { windowMs: number; max: number; keyPrefix: string }) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const forwardedFor = String(req.headers["x-forwarded-for"] ?? "").split(",")[0]?.trim();
+    const ip = forwardedFor || req.ip || req.socket.remoteAddress || "unknown";
+    const key = `${options.keyPrefix}:${ip}`;
+    const now = Date.now();
+
+    if (rateBuckets.size > 5000) {
+      for (const [bucketKey, bucket] of rateBuckets) {
+        if (bucket.resetAt <= now) rateBuckets.delete(bucketKey);
+      }
+    }
+
+    const bucket = rateBuckets.get(key);
+    if (!bucket || bucket.resetAt <= now) {
+      rateBuckets.set(key, { count: 1, resetAt: now + options.windowMs });
+      return next();
+    }
+
+    bucket.count += 1;
+    if (bucket.count > options.max) {
+      res.setHeader("Retry-After", String(Math.ceil((bucket.resetAt - now) / 1000)));
+      return res.status(429).json({ message: "Muitas tentativas. Tente novamente em alguns minutos." });
+    }
+
+    return next();
+  };
+}
+
+const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 600, keyPrefix: "global" });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, keyPrefix: "auth" });
+const uploadLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 20, keyPrefix: "upload" });
+
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+app.use(globalLimiter);
 app.use(
   cors({
     origin(origin, callback) {
@@ -122,7 +169,7 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: "Filhos do Rei BJJ API" });
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", authLimiter, async (req, res) => {
   const parsed = z
     .object({ email: z.string().min(1), password: z.string().min(1) })
     .safeParse(req.body);
@@ -180,7 +227,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
   res.json({ user: req.user, student });
 });
 
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/auth/register", authLimiter, async (req, res) => {
   const parsed = z
     .object({
       fullName: z.string().min(3),
@@ -217,7 +264,7 @@ app.post("/api/auth/register", async (req, res) => {
   res.status(201).json(result.rows[0]);
 });
 
-app.post("/api/auth/password-reset", async (req, res) => {
+app.post("/api/auth/password-reset", authLimiter, async (req, res) => {
   const parsed = z
     .object({
       email: z.string().email().optional().or(z.literal("")),
@@ -881,6 +928,7 @@ app.delete("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), 
 });
 
 app.get("/api/student/dashboard", requireAuth, async (req, res) => {
+  const studentId = await resolveStudentId(req.user?.id, req.query.studentId, req.user?.role);
   const studentResult = await query<{
     id: string;
     full_name: string;
@@ -892,10 +940,7 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
     xp: number;
     level: number;
     plan_id: string | null;
-  }>("SELECT * FROM students WHERE user_id = $1 OR id = $2 LIMIT 1", [
-    req.user?.id,
-    req.query.studentId ?? null
-  ]);
+  }>("SELECT * FROM students WHERE id = $1 LIMIT 1", [studentId]);
   const student = studentResult.rows[0];
 
   if (!student) {
@@ -968,7 +1013,7 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
   });
 });
 
-app.patch("/api/student/photo", requireAuth, requireRole(["student"]), async (req, res) => {
+app.patch("/api/student/photo", requireAuth, requireRole(["student"]), uploadLimiter, async (req, res) => {
   const parsed = z
     .object({
       photoUrl: z.string().regex(/^data:image\/(png|jpeg|jpg|webp);base64,/).max(2_500_000)
@@ -995,7 +1040,7 @@ app.patch("/api/student/photo", requireAuth, requireRole(["student"]), async (re
 });
 
 app.post("/api/student/checkins", requireAuth, async (req, res, next) => {
-  const studentId = await resolveStudentId(req.user?.id, req.body.studentId);
+  const studentId = await resolveStudentId(req.user?.id, req.body.studentId, req.user?.role, ["admin", "teacher"]);
   if (!studentId) return res.status(404).json({ message: "Aluno nao encontrado." });
 
   const client = await pool.connect();
@@ -1102,7 +1147,7 @@ app.post("/api/student/checkins", requireAuth, async (req, res, next) => {
 });
 
 app.post("/api/student/checkins-legacy", requireAuth, async (req, res) => {
-  const studentId = await resolveStudentId(req.user?.id, req.body.studentId);
+  const studentId = await resolveStudentId(req.user?.id, req.body.studentId, req.user?.role, ["admin", "teacher"]);
   if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
 
   const requestedClass = z.object({ classId: z.string().uuid().optional() }).safeParse(req.body);
@@ -1186,7 +1231,7 @@ app.post("/api/student/checkins-legacy", requireAuth, async (req, res) => {
 });
 
 app.get("/api/student/finance", requireAuth, async (req, res) => {
-  const studentId = await resolveStudentId(req.user?.id, req.query.studentId);
+  const studentId = await resolveStudentId(req.user?.id, req.query.studentId, req.user?.role);
   if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
 
   const result = await query(
@@ -1565,7 +1610,7 @@ app.patch(
 
 app.get("/api/techniques", requireAuth, async (req, res) => {
   const requestedStudentId = req.user?.role === "student" ? undefined : req.query.studentId;
-  const studentId = await resolveStudentId(req.user?.id, requestedStudentId);
+  const studentId = await resolveStudentId(req.user?.id, requestedStudentId, req.user?.role);
   const result = await query(
     `SELECT t.id, t.category, t.name, t.description, t.video_url, t.notes,
       COALESCE(st.status::text, 'not_learned') AS status
@@ -1577,7 +1622,7 @@ app.get("/api/techniques", requireAuth, async (req, res) => {
   res.json(result.rows);
 });
 
-app.post("/api/techniques/video", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/techniques/video", requireAuth, requireRole(["admin", "teacher"]), uploadLimiter, async (req, res) => {
   const parsed = z
     .object({
       fileName: z.string().min(1).max(180),
@@ -2057,7 +2102,7 @@ app.delete("/api/competitions/:id", requireAuth, requireRole(["admin", "teacher"
 });
 
 app.post("/api/competitions/:id/confirm", requireAuth, async (req, res) => {
-  const studentId = await resolveStudentId(req.user?.id, req.body.studentId);
+  const studentId = await resolveStudentId(req.user?.id, req.body.studentId, req.user?.role, ["admin", "teacher"]);
   if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
 
   const result = await query(
@@ -2076,7 +2121,7 @@ app.get("/api/products", requireAuth, async (_req, res) => {
   res.json(result.rows);
 });
 
-app.post("/api/products/image", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/products/image", requireAuth, requireRole(["admin", "teacher"]), uploadLimiter, async (req, res) => {
   const parsed = z
     .object({
       fileName: z.string().min(1).max(180),
@@ -2429,8 +2474,19 @@ async function syncMembershipPayment(client: Pick<typeof pool, "query">, student
   );
 }
 
-async function resolveStudentId(userId?: string, fallback?: unknown) {
-  if (typeof fallback === "string" && fallback.length > 0) {
+type StudentFallbackRole = "admin" | "teacher" | "finance";
+
+function canUseStudentFallback(role?: string, allowedRoles: StudentFallbackRole[] = ["admin", "teacher", "finance"]) {
+  return allowedRoles.includes(role as StudentFallbackRole);
+}
+
+async function resolveStudentId(userId?: string, fallback?: unknown, role?: string, allowedFallbackRoles?: StudentFallbackRole[]) {
+  if (
+    typeof fallback === "string" &&
+    fallback.length > 0 &&
+    canUseStudentFallback(role, allowedFallbackRoles) &&
+    z.string().uuid().safeParse(fallback).success
+  ) {
     return fallback;
   }
 
