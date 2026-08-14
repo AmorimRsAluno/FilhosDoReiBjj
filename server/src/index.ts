@@ -909,10 +909,7 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
         'Check-in automatico do plano' AS focus,
         (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_start_time) AT TIME ZONE 'America/Sao_Paulo') AS checkin_start_at,
         (((now() AT TIME ZONE 'America/Sao_Paulo')::date + mp.checkin_end_time) AT TIME ZONE 'America/Sao_Paulo') AS checkin_end_at,
-        (
-          EXTRACT(DOW FROM now() AT TIME ZONE 'America/Sao_Paulo')::int = ANY(mp.checkin_days)
-          AND (now() AT TIME ZONE 'America/Sao_Paulo')::time BETWEEN mp.checkin_start_time AND mp.checkin_end_time
-        ) AS checkin_open
+        true AS checkin_open
        FROM membership_plans mp
        WHERE mp.id = $1 AND mp.status = 'active'
          AND EXTRACT(DOW FROM now() AT TIME ZONE 'America/Sao_Paulo')::int = ANY(mp.checkin_days)
@@ -1018,7 +1015,6 @@ app.post("/api/student/checkins", requireAuth, async (req, res, next) => {
        WHERE s.id = $1
          AND mp.status = 'active'
          AND EXTRACT(DOW FROM now() AT TIME ZONE 'America/Sao_Paulo')::int = ANY(mp.checkin_days)
-         AND (now() AT TIME ZONE 'America/Sao_Paulo')::time BETWEEN mp.checkin_start_time AND mp.checkin_end_time
        LIMIT 1`,
       [studentId]
     );
@@ -1026,7 +1022,7 @@ app.post("/api/student/checkins", requireAuth, async (req, res, next) => {
     const schedule = scheduleResult.rows[0];
     if (!schedule) {
       await client.query("ROLLBACK");
-      return res.status(404).json({ message: "Check-in indisponivel para o horario ou plano atual." });
+      return res.status(404).json({ message: "Check-in indisponivel para o dia de aula atual." });
     }
 
     const classResult = await client.query(

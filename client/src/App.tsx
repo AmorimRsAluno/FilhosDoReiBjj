@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   Award,
+  BellRing,
   BookOpen,
   CalendarCheck,
   Camera,
@@ -1209,6 +1210,7 @@ function StudentDashboardView({ token }: { token: string }) {
   const [checkinMessage, setCheckinMessage] = useState("");
   const [checkinBurst, setCheckinBurst] = useState(false);
   const [lastCheckinXp, setLastCheckinXp] = useState<number | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
   const [photoLoading, setPhotoLoading] = useState(false);
   const [photoMessage, setPhotoMessage] = useState("");
 
@@ -1224,6 +1226,31 @@ function StudentDashboardView({ token }: { token: string }) {
     return () => window.clearTimeout(timeout);
   }, [checkinBurst]);
 
+  useEffect(() => {
+    if ("Notification" in window) setNotificationPermission(Notification.permission);
+  }, []);
+
+  useEffect(() => {
+    if (notificationPermission !== "granted" || !data?.nextClass) return;
+
+    const classTime = new Date(data.nextClass.class_date).getTime();
+    if (Number.isNaN(classTime)) return;
+
+    const reminderAt = classTime - 30 * 60 * 1000;
+    const now = Date.now();
+    const reminderKey = `filhos-do-rei-lesson-reminder:${data.nextClass.id}:${new Date(data.nextClass.class_date).toISOString().slice(0, 10)}`;
+    if (localStorage.getItem(reminderKey)) return;
+    if (now > classTime + 30 * 60 * 1000) return;
+
+    const delay = Math.max(0, reminderAt - now);
+    const timeout = window.setTimeout(() => {
+      showLessonNotification(data.nextClass?.title ?? "Aula de Jiu-Jitsu", data.nextClass?.class_date);
+      localStorage.setItem(reminderKey, "sent");
+    }, delay);
+
+    return () => window.clearTimeout(timeout);
+  }, [data?.nextClass, notificationPermission]);
+
   if (loading) return <Loading title="Carregando área do aluno" />;
   if (error) return <ErrorBox message={error} />;
   if (!data) return null;
@@ -1238,9 +1265,7 @@ function StudentDashboardView({ token }: { token: string }) {
   const techniqueTotal = data.techniqueSummary.reduce((sum, item) => sum + item.total, 0);
   const studentGoal = data.student.goals?.trim();
   const checkinOpen = Boolean(data.nextClass?.checkin_open);
-  const checkinWindowText = data.nextClass
-    ? `Check-in liberado de ${formatDateTime(data.nextClass.checkin_start_at)} até ${formatDateTime(data.nextClass.checkin_end_at)}`
-    : "";
+  const remindersSupported = "Notification" in window;
   const checkinRecentlyConfirmed = lastCheckinXp !== null;
   const checkinApproved = activeCheckin?.status === "approved" || checkinRecentlyConfirmed;
   const confirmedXp = Math.max(Number(lastCheckinXp ?? 0), Number(activeCheckin?.xp_awarded ?? 0));
@@ -1260,13 +1285,13 @@ function StudentDashboardView({ token }: { token: string }) {
       : checkinOpen
         ? "Confirmar presença"
         : data.nextClass
-          ? "Aguardando horário"
+          ? "Disponível no dia da aula"
           : "Sem aula disponível";
 
   async function requestCheckin() {
     if (!data?.nextClass) return;
     if (!checkinOpen) {
-      setCheckinMessage("Check-in ainda não está liberado para o horário e plano desta aula.");
+      setCheckinMessage("Check-in disponível no dia de aula.");
       return;
     }
 
@@ -1287,6 +1312,24 @@ function StudentDashboardView({ token }: { token: string }) {
     } finally {
       setCheckinLoading(false);
     }
+  }
+
+  async function enableLessonNotifications() {
+    if (!remindersSupported) {
+      setCheckinMessage("Este navegador não oferece notificações para PWA.");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+
+    if (permission === "granted") {
+      setCheckinMessage("Lembretes ativados. Você será avisado antes da aula quando o PWA estiver ativo.");
+      await showLessonNotification("Lembretes ativados", "O Filhos do Rei BJJ vai lembrar você da próxima aula.");
+      return;
+    }
+
+    setCheckinMessage("Permissão de notificação não liberada no navegador.");
   }
 
   async function updateProfilePhoto(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1357,16 +1400,16 @@ function StudentDashboardView({ token }: { token: string }) {
               {activeCheckin?.status === "pending" && <Badge tone="gold">Registrando</Badge>}
               {activeCheckin?.status === "approved" && <Badge tone="green">Treino validado</Badge>}
               {activeCheckin?.status === "rejected" && <Badge tone="red">Revisar com professor</Badge>}
-              {checkinOpen && !checkinApproved && <span className="checkin-live-chip"><span /> Aberto agora</span>}
+              {checkinOpen && !checkinApproved && <span className="checkin-live-chip"><span /> Livre hoje</span>}
             </div>
             <p className="mt-2 text-sm text-zinc-300">
               {data.nextClass
-                ? `${data.nextClass.title} · ${formatDateTime(data.nextClass.class_date)}`
+                ? `${data.nextClass.title} · ${formatDate(data.nextClass.class_date)}`
                 : "Nenhuma aula disponível para check-in."}
             </p>
             {data.nextClass && (
               <p className={`mt-2 text-sm ${checkinOpen ? "text-emerald-300" : "text-royal-muted"}`}>
-                {checkinOpen ? "Check-in liberado agora." : "Check-in fora da janela liberada."} {checkinWindowText}
+                {checkinOpen ? "Check-in livre durante o dia de aula. Faça quando chegar no treino." : "Check-in disponível no dia da aula."}
               </p>
             )}
             {checkinApproved && confirmedXp > 0 && (
@@ -1393,14 +1436,29 @@ function StudentDashboardView({ token }: { token: string }) {
               </span>
               <span>
                 <strong>{checkinActionText}</strong>
-                <small>{checkinOpen && !checkinApproved ? "+50 XP ao confirmar" : checkinApproved ? "Presença registrada" : "Volte no horário da aula"}</small>
+                <small>{checkinOpen && !checkinApproved ? "+50 XP ao confirmar" : checkinApproved ? "Presença registrada" : "Disponível no dia da aula"}</small>
               </span>
               {checkinOpen && !checkinApproved && <ArrowRight className="checkin-arrow" size={20} />}
             </button>
             <div className="checkin-mini-panel">
               <Clock size={15} />
-              <span>{data.nextClass ? (checkinOpen ? "Janela liberada" : "Fora da janela") : "Sem aula ativa"}</span>
+              <span>{data.nextClass ? (checkinOpen ? "Check-in livre hoje" : "Aguardando dia de aula") : "Sem aula ativa"}</span>
             </div>
+            {remindersSupported && notificationPermission !== "granted" && (
+              <button type="button" className="checkin-reminder-button" onClick={enableLessonNotifications}>
+                <BellRing size={16} /> Ativar lembretes no celular
+              </button>
+            )}
+            {remindersSupported && notificationPermission === "granted" && (
+              <div className="checkin-reminder-status">
+                <BellRing size={15} /> Lembretes ativos no PWA
+              </div>
+            )}
+            {remindersSupported && notificationPermission === "denied" && (
+              <div className="checkin-reminder-status is-blocked">
+                Notificações bloqueadas no navegador
+              </div>
+            )}
           </div>
         </div>
       </Card>
@@ -1438,7 +1496,7 @@ function StudentDashboardView({ token }: { token: string }) {
           {data.nextClass ? (
             <div className="mt-4 rounded-lg border border-royal-line bg-black/25 p-4">
               <p className="font-bold text-white">{data.nextClass.title}</p>
-              <p className="mt-1 text-sm text-royal-muted">{formatDateTime(data.nextClass.class_date)}</p>
+              <p className="mt-1 text-sm text-royal-muted">{formatDate(data.nextClass.class_date)}</p>
               <p className="mt-3 text-sm text-zinc-300">{data.nextClass.focus}</p>
             </div>
           ) : (
@@ -1471,6 +1529,31 @@ function StudentDashboardView({ token }: { token: string }) {
       </Card>
     </div>
   );
+}
+
+async function showLessonNotification(title: string, detail?: string) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const detailAsDate = detail ? new Date(detail) : null;
+  const isDateDetail = detailAsDate && !Number.isNaN(detailAsDate.getTime());
+  const body = isDateDetail
+    ? "Sua aula está chegando. Abra o app e faça o check-in quando chegar no treino."
+    : detail ?? "Lembrete da academia Filhos do Rei BJJ.";
+  const options: NotificationOptions = {
+    body,
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    tag: "filhos-do-rei-aula",
+    data: { url: "/" }
+  };
+
+  const registration = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration().catch(() => null) : null;
+  if (registration?.showNotification) {
+    await registration.showNotification(title, options);
+    return;
+  }
+
+  new Notification(title, options);
 }
 
 function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boolean }) {

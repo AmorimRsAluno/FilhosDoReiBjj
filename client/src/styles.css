@@ -991,6 +991,47 @@ input[type="date"] {
   font-weight: 700;
 }
 
+.checkin-reminder-button,
+.checkin-reminder-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.65rem;
+  border-radius: 0.85rem;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.checkin-reminder-button {
+  border: 1px solid rgba(255, 196, 15, 0.42);
+  background: rgba(255, 196, 15, 0.1);
+  color: #ffc40f;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 180ms ease;
+}
+
+.checkin-reminder-button:hover {
+  border-color: rgba(255, 196, 15, 0.72);
+  background: rgba(255, 196, 15, 0.16);
+  transform: translateY(-1px);
+}
+
+.checkin-reminder-status {
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.1);
+  color: #86efac;
+}
+
+.checkin-reminder-status.is-blocked {
+  border-color: rgba(239, 68, 68, 0.32);
+  background: rgba(239, 68, 68, 0.1);
+  color: #fca5a5;
+}
+
 .checkin-xp-toast {
   display: inline-flex;
   align-items: center;

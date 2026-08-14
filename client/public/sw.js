@@ -1,4 +1,4 @@
-const CACHE_NAME = "filhos-do-rei-pwa-v2";
+const CACHE_NAME = "filhos-do-rei-pwa-v3";
 const APP_SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -46,6 +46,20 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(request, responseClone));
         return response;
       });
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = event.notification.data?.url || "/";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existingClient = clients.find((client) => "focus" in client);
+      if (existingClient) return existingClient.focus();
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+      return undefined;
     })
   );
 });
