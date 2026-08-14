@@ -90,6 +90,7 @@ const permissionOptions = [
   ["finance", "Financeiro"],
   ["plans", "Planos"],
   ["attendance", "Aulas"],
+  ["checkins", "Check-ins realizados"],
   ["techniques", "Técnicas"],
   ["ranking", "Ranking"],
   ["store", "Loja"],
@@ -104,6 +105,7 @@ const adminNav = [
   { key: "finance", label: "Financeiro", icon: CreditCard },
   { key: "plans", label: "Planos", icon: CreditCard },
   { key: "attendance", label: "Aulas", icon: ClipboardCheck },
+  { key: "checkins", label: "Check-ins realizados", icon: CalendarCheck },
   { key: "techniques", label: "Técnicas", icon: BookOpen },
   { key: "ranking", label: "Ranking", icon: Trophy },
   { key: "store", label: "Loja", icon: ShoppingBag },
@@ -503,7 +505,9 @@ function PremiumInput({
 function AdminApp({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState<AdminTab>("dashboard");
   const allowed = session.user.permissions ?? [];
-  const visibleNav = adminNav.filter((item) => session.user.role === "admin" || allowed.includes(item.key));
+  const visibleNav = adminNav.filter(
+    (item) => session.user.role === "admin" || allowed.includes(item.key) || (item.key === "checkins" && allowed.includes("attendance"))
+  );
 
   useEffect(() => {
     if (!visibleNav.some((item) => item.key === tab)) setTab((visibleNav[0]?.key ?? "dashboard") as AdminTab);
@@ -522,6 +526,7 @@ function AdminApp({ session, onLogout }: { session: Session; onLogout: () => voi
       {tab === "finance" && <FinancePanel token={session.token} isAdmin />}
       {tab === "plans" && <PlansPanel token={session.token} />}
       {tab === "attendance" && <AttendancePanel token={session.token} />}
+      {tab === "checkins" && <CheckinsPanel token={session.token} />}
       {tab === "techniques" && <TechniquesPanel token={session.token} isAdmin />}
       {tab === "ranking" && <RankingPanel token={session.token} />}
       {tab === "store" && <StorePanel token={session.token} isAdmin />}
@@ -1951,7 +1956,6 @@ function BusinessFinancePanel({ token }: { token: string }) {
 
 function AttendancePanel({ token }: { token: string }) {
   const plans = useApi<MembershipPlan[]>("/plans", token);
-  const checkinReport = useApi<CheckinRequest[]>("/checkin-requests?status=all", token);
   const [drafts, setDrafts] = useState<Record<string, { checkinStartTime: string; checkinEndTime: string; checkinDays: number[] }>>({});
   const [savingPlanId, setSavingPlanId] = useState("");
   const [message, setMessage] = useState("");
@@ -2018,13 +2022,13 @@ function AttendancePanel({ token }: { token: string }) {
 
   return (
     <div className="space-y-5">
-      <PageTitle title="Aulas" subtitle="Horários automáticos de check-in por plano e histórico de presença" />
+      <PageTitle title="Aulas" subtitle="Dias de aula por plano e referência para lembretes do PWA" />
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-bold text-white">Grade automática por plano</h3>
             <p className="mt-1 text-sm text-royal-muted">
-              O aluno faz check-in dentro do horário do próprio plano. A presença e o XP são registrados automaticamente.
+              O aluno faz check-in livremente no dia de aula. O horário abaixo serve como referência de aula e lembrete no PWA.
             </p>
           </div>
           <Badge tone="gold">Sem criação manual de aulas</Badge>
@@ -2049,10 +2053,10 @@ function AttendancePanel({ token }: { token: string }) {
                   <Badge tone={plan.status === "active" ? "green" : "neutral"}>{plan.status === "active" ? "Ativo" : "Inativo"}</Badge>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Check-in começa">
+                  <Field label="Aula começa">
                     <Input type="time" value={draft.checkinStartTime} onChange={(e) => updateDraft(plan.id, { checkinStartTime: e.target.value })} />
                   </Field>
-                  <Field label="Check-in termina">
+                  <Field label="Aula termina">
                     <Input type="time" value={draft.checkinEndTime} onChange={(e) => updateDraft(plan.id, { checkinEndTime: e.target.value })} />
                   </Field>
                 </div>
@@ -2075,7 +2079,7 @@ function AttendancePanel({ token }: { token: string }) {
                   </div>
                 </div>
                 <Button disabled={savingPlanId === plan.id || draft.checkinDays.length === 0} onClick={() => saveSchedule(plan)}>
-                  <Save size={16} /> {savingPlanId === plan.id ? "Salvando..." : "Salvar horário do plano"}
+                  <Save size={16} /> {savingPlanId === plan.id ? "Salvando..." : "Salvar grade do plano"}
                 </Button>
               </Card>
             );
@@ -2084,34 +2088,135 @@ function AttendancePanel({ token }: { token: string }) {
         {errorMessage && <ErrorBox message={errorMessage} />}
         {message && <p className="mt-3 text-sm text-royal-gold">{message}</p>}
       </Card>
+    </div>
+  );
+}
+
+function CheckinsPanel({ token }: { token: string }) {
+  const checkins = useApi<CheckinRequest[]>("/checkin-requests?status=all", token);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<"all" | CheckinRequest["status"]>("all");
+  const [period, setPeriod] = useState(currentMonthValue());
+  const [updatingId, setUpdatingId] = useState("");
+  const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const records = checkins.data ?? [];
+  const filteredRecords = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return records.filter((item) => {
+      const recordMonth = monthValueFromDate(item.class_date || item.requested_at);
+      const matchesPeriod = !period || recordMonth === period;
+      const matchesStatus = status === "all" || item.status === status;
+      const searchable = `${item.full_name} ${item.plan_name ?? ""} ${item.title} ${item.focus}`.toLowerCase();
+      const matchesSearch = !term || searchable.includes(term);
+      return matchesPeriod && matchesStatus && matchesSearch;
+    });
+  }, [period, records, search, status]);
+  const stats = {
+    total: filteredRecords.length,
+    approved: filteredRecords.filter((item) => item.status === "approved").length,
+    rejected: filteredRecords.filter((item) => item.status === "rejected").length,
+    pending: filteredRecords.filter((item) => item.status === "pending").length,
+    xp: filteredRecords.reduce((sum, item) => sum + Number(item.status === "approved" ? item.xp_awarded ?? 0 : 0), 0)
+  };
+
+  async function updateCheckin(item: CheckinRequest, nextStatus: "approved" | "rejected") {
+    if (nextStatus === "rejected") {
+      const confirmed = window.confirm(`Invalidar o check-in de ${item.full_name}? A presença e o XP desta aula serão removidos.`);
+      if (!confirmed) return;
+    }
+
+    setMessage("");
+    setErrorMessage("");
+    setUpdatingId(item.id);
+    try {
+      await request(`/checkin-requests/${item.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus })
+      });
+      setMessage(nextStatus === "approved" ? "Check-in validado." : "Check-in invalidado e presença removida.");
+      checkins.reload();
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : "Não foi possível atualizar o check-in.");
+    } finally {
+      setUpdatingId("");
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <PageTitle title="Check-ins realizados" subtitle="Auditoria de presenças, XP aplicado e controle por aluno" />
+      <div className="grid gap-3 md:grid-cols-4">
+        <StatCard icon={<CalendarCheck />} label="Registros filtrados" value={stats.total} />
+        <StatCard icon={<CheckCircle2 />} label="Confirmados" value={stats.approved} />
+        <StatCard icon={<Shield />} label="Invalidados" value={stats.rejected} danger={stats.rejected > 0} />
+        <StatCard icon={<Sparkles />} label="XP validado" value={`+${stats.xp}`} />
+      </div>
+
+      <Card>
+        <div className="grid gap-3 lg:grid-cols-[1fr_180px_180px]">
+          <label className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-royal-muted" size={16} />
+            <Input className="pl-9" placeholder="Buscar por aluno, plano ou aula" value={search} onChange={(event) => setSearch(event.target.value)} />
+          </label>
+          <Input type="month" value={period} onChange={(event) => setPeriod(event.target.value || currentMonthValue())} />
+          <Select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>
+            <option value="all">Todos</option>
+            <option value="approved">Confirmados</option>
+            <option value="rejected">Invalidados</option>
+            <option value="pending">Pendentes</option>
+          </Select>
+        </div>
+        {message && <p className="mt-3 text-sm font-semibold text-royal-gold">{message}</p>}
+        {errorMessage && <ErrorBox message={errorMessage} />}
+      </Card>
+
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-lg font-bold text-white">Histórico de check-ins</h3>
-            <p className="mt-1 text-sm text-royal-muted">Controle para o professor conferir presença, plano, horário solicitado e XP aplicado.</p>
+            <h3 className="text-lg font-bold text-white">Histórico por aluno</h3>
+            <p className="mt-1 text-sm text-royal-muted">Use esta lista para conferir quem marcou presença e invalidar check-ins falsos.</p>
           </div>
-          <Badge tone="gold">{checkinReport.data?.length ?? 0} registros</Badge>
+          <Badge tone="gold">{filteredRecords.length} registro(s)</Badge>
         </div>
         <div className="mt-4 grid gap-3">
-          {checkinReport.loading && <p className="text-sm text-royal-muted">Carregando histórico...</p>}
-          {checkinReport.error && <ErrorBox message={checkinReport.error} />}
-          {!checkinReport.loading && checkinReport.data?.length === 0 && <EmptyState>Nenhum check-in registrado ainda.</EmptyState>}
-          {checkinReport.data?.map((item) => (
-            <div key={item.id} className="grid gap-3 rounded-lg border border-royal-line bg-black/25 p-3 lg:grid-cols-[1fr_auto] lg:items-center">
+          {checkins.loading && <p className="text-sm text-royal-muted">Carregando check-ins...</p>}
+          {checkins.error && <ErrorBox message={checkins.error} />}
+          {!checkins.loading && filteredRecords.length === 0 && <EmptyState>Nenhum check-in encontrado para os filtros atuais.</EmptyState>}
+          {filteredRecords.map((item) => (
+            <div key={item.id} className="grid gap-3 rounded-lg border border-royal-line bg-black/25 p-3 xl:grid-cols-[1fr_auto] xl:items-center">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-bold text-white">{item.full_name}</p>
-                  {checkinStatusBadge(item.status)}
-                  <Badge>{item.plan_name ?? "Sem plano"}</Badge>
+                  <Avatar src={item.photo_url} name={item.full_name} />
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-bold text-white">{item.full_name}</p>
+                      {checkinStatusBadge(item.status)}
+                      <Badge>{item.belt}</Badge>
+                      {item.plan_name && <Badge tone="gold">{item.plan_name}</Badge>}
+                    </div>
+                    <p className="mt-1 text-sm text-royal-muted">
+                      Aula {formatDate(item.class_date)} · check-in {formatDateTime(item.requested_at)}
+                    </p>
+                    {item.reviewed_at && <p className="mt-1 text-xs text-royal-muted">Última revisão: {formatDateTime(item.reviewed_at)}</p>}
+                  </div>
                 </div>
-                <p className="mt-1 text-sm text-royal-muted">
-                  {item.title} · aula {formatDateTime(item.class_date)} · check-in {formatDateTime(item.requested_at)}
-                </p>
-                <p className="mt-1 text-xs text-royal-muted">
-                  Janela do plano: {item.checkin_start_at ? formatDateTime(item.checkin_start_at) : "-"} até {item.checkin_end_at ? formatDateTime(item.checkin_end_at) : "-"}
-                </p>
               </div>
-              <p className="text-sm font-semibold text-royal-gold">+{item.xp_awarded} XP</p>
+              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                <Badge tone={item.status === "approved" ? "green" : item.status === "rejected" ? "red" : "gold"}>
+                  +{Number(item.xp_awarded ?? 0)} XP
+                </Badge>
+                {item.status !== "approved" && (
+                  <Button disabled={updatingId === item.id} onClick={() => updateCheckin(item, "approved")}>
+                    <CheckCircle2 size={16} /> Validar
+                  </Button>
+                )}
+                {item.status !== "rejected" && (
+                  <Button variant="danger" disabled={updatingId === item.id} onClick={() => updateCheckin(item, "rejected")}>
+                    <Trash2 size={16} /> Invalidar aula
+                  </Button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -3368,6 +3473,13 @@ function youtubeEmbedUrl(value: string) {
 function currentMonthValue() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthValueFromDate(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function shiftMonthValue(value: string, amount: number) {

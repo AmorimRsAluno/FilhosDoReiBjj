@@ -51,6 +51,7 @@ const permissionKeys = [
   "finance",
   "plans",
   "attendance",
+  "checkins",
   "techniques",
   "ranking",
   "store",
@@ -60,7 +61,7 @@ const permissionKeys = [
 ] as const;
 const defaultRolePermissions: Record<string, string[]> = {
   admin: [...permissionKeys],
-  teacher: ["dashboard", "students", "plans", "attendance", "techniques", "ranking", "store", "competitions", "registrations"],
+  teacher: ["dashboard", "students", "plans", "attendance", "checkins", "techniques", "ranking", "store", "competitions", "registrations"],
   finance: ["dashboard", "finance", "plans"],
   student: ["dashboard", "finance", "techniques", "ranking", "store", "competitions"]
 };
@@ -1874,7 +1875,8 @@ app.patch("/api/checkin-requests/:id", requireAuth, requireRole(["admin", "teach
       class_id: string;
       student_id: string;
       status: string;
-    }>("SELECT id, class_id, student_id, status FROM training_checkins WHERE id = $1 FOR UPDATE", [
+      xp_awarded: number;
+    }>("SELECT id, class_id, student_id, status, xp_awarded FROM training_checkins WHERE id = $1 FOR UPDATE", [
       req.params.id
     ]);
 
@@ -1884,18 +1886,18 @@ app.patch("/api/checkin-requests/:id", requireAuth, requireRole(["admin", "teach
       return res.status(404).json({ message: "Solicitação não encontrada." });
     }
 
-    let xpAwarded = 0;
+    let xpAwarded = Number(checkin.xp_awarded ?? 0);
     if (parsed.data.status === "approved") {
-      const attendance = await client.query(
+      const attendance = await client.query<{ xp_awarded: number }>(
         `INSERT INTO attendance (class_id, student_id, check_in_at, xp_awarded)
          SELECT $1, $2, class_date, 50 FROM classes WHERE id = $1
          ON CONFLICT (class_id, student_id) DO NOTHING
-         RETURNING *`,
+         RETURNING xp_awarded`,
         [checkin.class_id, checkin.student_id]
       );
 
       if (attendance.rowCount) {
-        xpAwarded = 50;
+        xpAwarded = Number(attendance.rows[0]?.xp_awarded ?? 50);
         await client.query(
           `UPDATE students
            SET xp = xp + 50,
@@ -1907,7 +1909,34 @@ app.patch("/api/checkin-requests/:id", requireAuth, requireRole(["admin", "teach
         await client.query("INSERT INTO xp_history (student_id, points, reason) VALUES ($1, 50, 'Check-in confirmado pelo professor')", [
           checkin.student_id
         ]);
+      } else {
+        const existingAttendance = await client.query<{ xp_awarded: number }>(
+          "SELECT xp_awarded FROM attendance WHERE class_id = $1 AND student_id = $2",
+          [checkin.class_id, checkin.student_id]
+        );
+        xpAwarded = Math.max(xpAwarded, Number(existingAttendance.rows[0]?.xp_awarded ?? 0));
       }
+    } else {
+      const removedAttendance = await client.query<{ xp_awarded: number }>(
+        "DELETE FROM attendance WHERE class_id = $1 AND student_id = $2 RETURNING xp_awarded",
+        [checkin.class_id, checkin.student_id]
+      );
+      const removedXp = removedAttendance.rows.reduce((sum, row) => sum + Number(row.xp_awarded ?? 0), 0);
+      if (removedXp > 0) {
+        await client.query(
+          `UPDATE students
+           SET xp = GREATEST(0, xp - $2),
+               level = LEAST(100, GREATEST(1, (GREATEST(0, xp - $2) / 500) + 1)),
+               classes_until_next_stripe = classes_until_next_stripe + 1
+           WHERE id = $1`,
+          [checkin.student_id, removedXp]
+        );
+        await client.query("INSERT INTO xp_history (student_id, points, reason) VALUES ($1, $2, 'Check-in invalidado pelo professor')", [
+          checkin.student_id,
+          -removedXp
+        ]);
+      }
+      xpAwarded = 0;
     }
 
     const updated = await client.query(
