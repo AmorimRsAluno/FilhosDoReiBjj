@@ -48,6 +48,7 @@ import {
   type FinanceSummary,
   type MembershipPlan,
   type Payment,
+  type PaymentReview,
   type Product,
   type RankingItem,
   type RegistrationRequest,
@@ -65,6 +66,8 @@ import {
 import { Badge, Button, Card, CheckboxField, EmptyState, Field, Input, Select } from "./components/ui";
 
 const sessionKey = "filhos-do-rei-session";
+const sessionTempKey = "filhos-do-rei-session-temp";
+const rememberedLoginKey = "filhos-do-rei-remembered-login";
 const beltOptions = ["Branca", "Cinza", "Amarela", "Laranja", "Verde", "Azul", "Roxa", "Marrom", "Preta"] as const;
 const emptyStudentForm = {
   fullName: "",
@@ -133,20 +136,30 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(() => {
     if (new URLSearchParams(window.location.search).get("demo") === "login") {
       localStorage.removeItem(sessionKey);
+      sessionStorage.removeItem(sessionTempKey);
       return null;
     }
 
-    const stored = localStorage.getItem(sessionKey);
+    const stored = localStorage.getItem(sessionKey) ?? sessionStorage.getItem(sessionTempKey);
     return stored ? (JSON.parse(stored) as Session) : null;
   });
 
-  function handleSession(next: Session | null) {
+  function handleSession(next: Session | null, remember = true) {
     setSession(next);
-    if (next) localStorage.setItem(sessionKey, JSON.stringify(next));
-    else localStorage.removeItem(sessionKey);
+    if (next) {
+      const storage = remember ? localStorage : sessionStorage;
+      const otherStorage = remember ? sessionStorage : localStorage;
+      storage.setItem(remember ? sessionKey : sessionTempKey, JSON.stringify(next));
+      otherStorage.removeItem(remember ? sessionTempKey : sessionKey);
+      if (remember) localStorage.setItem(rememberedLoginKey, next.user.username ?? next.user.email);
+      else localStorage.removeItem(rememberedLoginKey);
+    } else {
+      localStorage.removeItem(sessionKey);
+      sessionStorage.removeItem(sessionTempKey);
+    }
   }
 
-  if (!session) return <Login onLogin={handleSession} />;
+  if (!session) return <Login onLogin={(next, remember) => handleSession(next, remember)} />;
 
   return session.user.role === "student" ? (
     <StudentApp session={session} onLogout={() => handleSession(null)} />
@@ -155,12 +168,12 @@ export default function App() {
   );
 }
 
-function Login({ onLogin }: { onLogin: (session: Session) => void }) {
+function Login({ onLogin }: { onLogin: (session: Session, remember: boolean) => void }) {
   const [mode, setMode] = useState<"login" | "register" | "reset">("login");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => localStorage.getItem(rememberedLoginKey) ?? "");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState(() => Boolean(localStorage.getItem(rememberedLoginKey)));
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [message, setMessage] = useState("");
@@ -217,7 +230,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
         method: "POST",
         body: JSON.stringify({ email, password })
       });
-      onLogin(session);
+      onLogin(session, rememberMe);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível entrar.");
     } finally {
@@ -393,7 +406,7 @@ function Login({ onLogin }: { onLogin: (session: Session) => void }) {
               label="Senha"
               icon={<LockKeyhole size={19} />}
               type="password"
-              placeholder="Senha: 6 a 8 caracteres com especial"
+              placeholder="Senha: 6 a 12 caracteres com especial"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="new-password"
@@ -522,9 +535,9 @@ function AdminApp({ session, onLogout }: { session: Session; onLogout: () => voi
       onLogout={onLogout}
     >
       {tab === "dashboard" && <AdminDashboardView token={session.token} />}
-      {tab === "students" && <StudentsPanel token={session.token} />}
+      {tab === "students" && <StudentsPanel token={session.token} role={session.user.role} />}
       {tab === "finance" && <FinancePanel token={session.token} isAdmin />}
-      {tab === "plans" && <PlansPanel token={session.token} />}
+      {tab === "plans" && <PlansPanel token={session.token} role={session.user.role} />}
       {tab === "attendance" && <AttendancePanel token={session.token} />}
       {tab === "checkins" && <CheckinsPanel token={session.token} />}
       {tab === "techniques" && <TechniquesPanel token={session.token} isAdmin />}
@@ -590,8 +603,8 @@ function UsersPanel({ token }: { token: string }) {
     setMessage("");
     setErrorMessage("");
     const newPassword = resetPasswords[id] ?? "";
-    if (status === "resolved" && !/^(?=.*[^A-Za-z0-9]).{6,8}$/.test(newPassword)) {
-      setErrorMessage("A nova senha precisa ter de 6 a 8 caracteres e pelo menos um caractere especial.");
+    if (status === "resolved" && !/^(?=.*[^A-Za-z0-9]).{6,12}$/.test(newPassword)) {
+      setErrorMessage("A nova senha precisa ter de 6 a 12 caracteres e pelo menos um caractere especial.");
       return;
     }
 
@@ -648,9 +661,9 @@ function UsersPanel({ token }: { token: string }) {
               <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto_auto]">
                 <Input
                   type="password"
-                  placeholder="Nova senha: 6 a 8 com especial"
+                  placeholder="Nova senha: 6 a 12 com especial"
                   minLength={6}
-                  maxLength={8}
+                  maxLength={12}
                   value={resetPasswords[item.id] ?? ""}
                   onChange={(event) => setResetPasswords({ ...resetPasswords, [item.id]: event.target.value })}
                 />
@@ -878,10 +891,12 @@ function AdminDashboardView({ token }: { token: string }) {
   );
 }
 
-function PlansPanel({ token }: { token: string }) {
+function PlansPanel({ token, role }: { token: string; role: Session["user"]["role"] }) {
   const { data, loading, error, reload } = useApi<MembershipPlan[]>("/plans", token);
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
+  const [planMessage, setPlanMessage] = useState("");
   const [form, setForm] = useState({
     name: "",
     audience: "",
@@ -919,9 +934,31 @@ function PlansPanel({ token }: { token: string }) {
     });
   }
 
+  async function deletePlan(plan: MembershipPlan) {
+    const confirmed = window.confirm(`Excluir o plano "${plan.name}"? Alunos vinculados ficarão sem plano até nova definição.`);
+    if (!confirmed) return;
+
+    setPlanMessage("");
+    setDeletingPlanId(plan.id);
+    try {
+      await request(`/plans/${plan.id}`, token, { method: "DELETE" });
+      setPlanMessage(`Plano "${plan.name}" excluído. Alunos vinculados foram desvinculados do plano.`);
+      if (editingPlanId === plan.id) {
+        setEditingPlanId(null);
+        setForm({ name: "", audience: "", monthlyValue: 120, dueDay: 10, description: "", status: "active" });
+      }
+      reload();
+    } catch (err) {
+      setPlanMessage(err instanceof Error ? err.message : "Não foi possível excluir o plano.");
+    } finally {
+      setDeletingPlanId(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <PageTitle title="Gerência de planos" subtitle="Tipos de mensalidade, valores e vencimento padrão dos alunos" />
+      {planMessage && <Card className="border-royal-gold/40 text-sm text-royal-gold">{planMessage}</Card>}
       <Card>
         <form className="grid gap-3 md:grid-cols-2 xl:grid-cols-6" onSubmit={savePlan}>
           <Input className="xl:col-span-2" placeholder="Nome do plano" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
@@ -975,10 +1012,15 @@ function PlansPanel({ token }: { token: string }) {
                 <span>Dias: {formatWeekDays(plan.checkin_days)}</span>
               </div>
               {plan.description && <p className="text-sm text-royal-muted">{plan.description}</p>}
-              <div className="flex justify-end">
+              <div className="flex flex-wrap justify-end gap-2">
                 <Button variant="ghost" onClick={() => editPlan(plan)}>
                   <Pencil size={16} /> Editar
                 </Button>
+                {role === "admin" && (
+                  <Button variant="danger" disabled={deletingPlanId === plan.id} onClick={() => deletePlan(plan)}>
+                    <Trash2 size={16} /> {deletingPlanId === plan.id ? "Excluindo..." : "Excluir"}
+                  </Button>
+                )}
               </div>
             </Card>
           ))}
@@ -988,13 +1030,15 @@ function PlansPanel({ token }: { token: string }) {
   );
 }
 
-function StudentsPanel({ token }: { token: string }) {
+function StudentsPanel({ token, role }: { token: string; role: Session["user"]["role"] }) {
   const { data, loading, error, reload } = useApi<Student[]>("/students", token);
   const plans = useApi<MembershipPlan[]>("/plans", token);
   const [form, setForm] = useState(emptyStudentForm);
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null);
+  const [studentMessage, setStudentMessage] = useState("");
   const activePlans = (plans.data ?? []).filter((plan) => plan.status === "active");
   const filteredStudents = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -1050,9 +1094,28 @@ function StudentsPanel({ token }: { token: string }) {
     setForm(emptyStudentForm);
   }
 
+  async function deleteStudent(student: Student) {
+    const confirmed = window.confirm(`Excluir o registro de ${student.full_name}? O acesso do aluno também será removido quando houver usuário vinculado.`);
+    if (!confirmed) return;
+
+    setStudentMessage("");
+    setDeletingStudentId(student.id);
+    try {
+      await request(`/students/${student.id}`, token, { method: "DELETE" });
+      setStudentMessage(`Registro de ${student.full_name} excluído com sucesso.`);
+      if (editingStudentId === student.id) cancelEdit();
+      reload();
+    } catch (err) {
+      setStudentMessage(err instanceof Error ? err.message : "Não foi possível excluir o aluno.");
+    } finally {
+      setDeletingStudentId(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <PageTitle title="Gestão de alunos" subtitle="Atualização cadastral, graduação, frequência e status financeiro" />
+      {studentMessage && <Card className="border-royal-gold/40 text-sm text-royal-gold">{studentMessage}</Card>}
       {editingStudentId ? (
       <Card>
         <form className="space-y-5" onSubmit={saveStudent}>
@@ -1200,6 +1263,11 @@ function StudentsPanel({ token }: { token: string }) {
                 <Button variant="ghost" onClick={() => editStudent(student)}>
                   <Pencil size={16} /> Editar
                 </Button>
+                {role === "admin" && (
+                  <Button variant="danger" disabled={deletingStudentId === student.id} onClick={() => deleteStudent(student)}>
+                    <Trash2 size={16} /> {deletingStudentId === student.id ? "Excluindo..." : "Excluir"}
+                  </Button>
+                )}
               </div>
             </Card>
           ))}
@@ -1567,6 +1635,7 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
   const { data, loading, error, reload } = useApi<Payment[]>("/student/finance", token);
   const [advanceMonths, setAdvanceMonths] = useState("1");
   const [advanceLoading, setAdvanceLoading] = useState(false);
+  const [submittingPaymentId, setSubmittingPaymentId] = useState("");
   const [financeMessage, setFinanceMessage] = useState("");
 
   const payments = data ?? [];
@@ -1580,6 +1649,7 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
   const featuredPayment = openPayments[0] ?? sortedPayments[0] ?? null;
   const openTotal = openPayments.reduce((sum, payment) => sum + Number(payment.value ?? 0), 0);
   const paidTotal = paidPayments.reduce((sum, payment) => sum + Number(payment.value ?? 0), 0);
+  const reviewTotal = payments.filter((payment) => payment.review_status === "pending").length;
   const paidPercent = payments.length ? Math.round((paidPayments.length / payments.length) * 100) : 0;
 
   async function copyPix(payment: Payment) {
@@ -1608,6 +1678,23 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
     }
   }
 
+  async function submitPaymentForReview(payment: Payment) {
+    setSubmittingPaymentId(payment.id);
+    setFinanceMessage("");
+    try {
+      await request(`/student/finance/payments/${payment.id}/submit-review`, token, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      setFinanceMessage(`Pagamento de ${payment.reference_month} enviado para análise do professor.`);
+      reload();
+    } catch (err) {
+      setFinanceMessage(err instanceof Error ? err.message : "Não foi possível enviar o pagamento para análise.");
+    } finally {
+      setSubmittingPaymentId("");
+    }
+  }
+
   function paymentCardClass(status: Payment["status"]) {
     if (status === "paid") return "border-emerald-400/30 bg-emerald-400/5";
     if (status === "overdue") return "border-royal-red/40 bg-royal-red/10";
@@ -1624,7 +1711,7 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
 
   return (
     <div className="space-y-5">
-      <PageTitle title="Financeiro" subtitle="Mensalidades, PIX, histórico e pagamentos adiantados" />
+      <PageTitle title="Financeiro" subtitle="Mensalidades, PIX, histórico, adiantamentos e análise de pagamento" />
       {loading && <Loading title="Carregando financeiro" />}
       {error && <ErrorBox message={error} />}
       {!loading && !error && (
@@ -1643,7 +1730,11 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
                       : "Quando uma mensalidade for gerada, o PIX e o vencimento aparecem aqui."}
                   </p>
                 </div>
-                {featuredPayment && statusBadge(featuredPayment.status)}
+                <div className="flex flex-wrap justify-end gap-2">
+                  {featuredPayment && featuredPayment.review_status === "pending" && <Badge tone="gold">Em análise</Badge>}
+                  {featuredPayment && featuredPayment.review_status === "rejected" && <Badge tone="red">Revisar pagamento</Badge>}
+                  {featuredPayment && statusBadge(featuredPayment.status)}
+                </div>
               </div>
               {featuredPayment ? (
                 <div className="mt-6 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
@@ -1652,9 +1743,24 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
                     <p className="mt-1 text-3xl font-black text-royal-gold">{formatMoney(featuredPayment.value)}</p>
                     <code className="mt-4 block rounded-lg border border-royal-line bg-black/35 p-3 text-xs text-zinc-300">{featuredPayment.pix_code}</code>
                   </div>
-                  <Button onClick={() => copyPix(featuredPayment)}>
-                    <CreditCard size={16} /> Copiar PIX
-                  </Button>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button variant="ghost" onClick={() => copyPix(featuredPayment)}>
+                      <CreditCard size={16} /> Copiar PIX
+                    </Button>
+                    {featuredPayment.status !== "paid" && (
+                      <Button
+                        disabled={submittingPaymentId === featuredPayment.id || featuredPayment.review_status === "pending"}
+                        onClick={() => submitPaymentForReview(featuredPayment)}
+                      >
+                        <CheckCircle2 size={16} />
+                        {featuredPayment.review_status === "pending"
+                          ? "Aguardando análise"
+                          : submittingPaymentId === featuredPayment.id
+                            ? "Enviando..."
+                            : "Enviar pagamento para análise"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <EmptyState>Nenhuma mensalidade encontrada.</EmptyState>
@@ -1682,7 +1788,7 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
             </Card>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
             <Card>
               <span className="text-sm text-royal-muted">Em aberto</span>
               <p className="mt-2 text-2xl font-black text-white">{formatMoney(openTotal)}</p>
@@ -1690,6 +1796,10 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
             <Card>
               <span className="text-sm text-royal-muted">Pago no histórico</span>
               <p className="mt-2 text-2xl font-black text-white">{formatMoney(paidTotal)}</p>
+            </Card>
+            <Card>
+              <span className="text-sm text-royal-muted">Em análise</span>
+              <p className="mt-2 text-2xl font-black text-white">{reviewTotal}</p>
             </Card>
             <Card>
               <span className="text-sm text-royal-muted">Organização</span>
@@ -1717,16 +1827,36 @@ function FinancePanel({ token, isAdmin = false }: { token: string; isAdmin?: boo
                       <div className="flex flex-wrap items-center gap-2">
                         <h4 className="font-bold text-white">{payment.reference_month}</h4>
                         {statusBadge(payment.status)}
+                        {payment.review_status === "pending" && <Badge tone="gold">Enviado para análise</Badge>}
+                        {payment.review_status === "approved" && <Badge tone="green">Análise aprovada</Badge>}
+                        {payment.review_status === "rejected" && <Badge tone="red">Análise recusada</Badge>}
                       </div>
                       <p className="mt-1 text-sm text-royal-muted">
                         Vencimento {formatDate(payment.due_date)} · {formatMoney(payment.value)}
                         {payment.paid_at ? ` · pago em ${formatDate(payment.paid_at)}` : ""}
+                        {payment.review_requested_at ? ` · análise enviada em ${formatDateTime(payment.review_requested_at)}` : ""}
                       </p>
                       <code className="mt-3 block rounded-lg border border-white/10 bg-black/35 p-3 text-xs text-zinc-300">{payment.pix_code}</code>
                     </div>
-                    <Button variant={payment.status === "paid" ? "ghost" : "primary"} onClick={() => copyPix(payment)}>
-                      <CreditCard size={16} /> Copiar PIX
-                    </Button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button variant="ghost" onClick={() => copyPix(payment)}>
+                        <CreditCard size={16} /> Copiar PIX
+                      </Button>
+                      {payment.status !== "paid" && (
+                        <Button
+                          variant={payment.review_status === "pending" ? "ghost" : "primary"}
+                          disabled={submittingPaymentId === payment.id || payment.review_status === "pending"}
+                          onClick={() => submitPaymentForReview(payment)}
+                        >
+                          <CheckCircle2 size={16} />
+                          {payment.review_status === "pending"
+                            ? "Aguardando professor"
+                            : submittingPaymentId === payment.id
+                              ? "Enviando..."
+                              : "Enviar para análise"}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1774,6 +1904,7 @@ function BusinessFinancePanel({ token }: { token: string }) {
   const periodLabel = formatMonthValue(period);
   const summary = useApi<FinanceSummary>(`/finance/summary?month=${period}`, token);
   const entries = useApi<FinanceEntry[]>(`/finance/entries?month=${period}`, token);
+  const paymentReviews = useApi<PaymentReview[]>("/finance/payment-reviews?status=pending", token);
   const [form, setForm] = useState({
     type: "expense",
     category: "Aluguel",
@@ -1785,6 +1916,8 @@ function BusinessFinancePanel({ token }: { token: string }) {
     notes: ""
   });
   const [reportMessage, setReportMessage] = useState("");
+  const [reviewingPaymentId, setReviewingPaymentId] = useState("");
+  const [paymentReviewMessage, setPaymentReviewMessage] = useState("");
 
   async function createEntry(event: React.FormEvent) {
     event.preventDefault();
@@ -1810,6 +1943,31 @@ function BusinessFinancePanel({ token }: { token: string }) {
     await request(`/finance/entries/${id}`, token, { method: "DELETE" });
     summary.reload();
     entries.reload();
+  }
+
+  async function reviewStudentPayment(review: PaymentReview, status: "approved" | "rejected") {
+    const confirmed =
+      status === "approved"
+        ? window.confirm(`Confirmar o pagamento de ${review.full_name} no valor de ${formatMoney(review.value)}?`)
+        : window.confirm(`Recusar o pagamento enviado por ${review.full_name}?`);
+    if (!confirmed) return;
+
+    setReviewingPaymentId(review.id);
+    setPaymentReviewMessage("");
+    try {
+      await request(`/finance/payment-reviews/${review.id}`, token, {
+        method: "PATCH",
+        body: JSON.stringify({ status })
+      });
+      setPaymentReviewMessage(status === "approved" ? "Pagamento confirmado e lançado no financeiro." : "Pagamento recusado.");
+      paymentReviews.reload();
+      summary.reload();
+      entries.reload();
+    } catch (err) {
+      setPaymentReviewMessage(err instanceof Error ? err.message : "Não foi possível revisar o pagamento.");
+    } finally {
+      setReviewingPaymentId("");
+    }
   }
 
   async function downloadReport(format: "xlsx" | "pdf" | "docx") {
@@ -1898,6 +2056,54 @@ function BusinessFinancePanel({ token }: { token: string }) {
           <StatCard icon={<Shield />} label="Mensalidades a receber" value={formatMoney(summary.data.receivable)} />
         </div>
       )}
+
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="section-kicker">Confirmar pagamentos</p>
+            <h3 className="text-lg font-bold text-white">Pagamentos enviados pelos alunos</h3>
+            <p className="mt-1 text-sm text-royal-muted">
+              Ao confirmar, a mensalidade fica paga e a receita entra no financeiro de forma automática.
+            </p>
+          </div>
+          <Badge tone="gold">{paymentReviews.data?.length ?? 0} pendente(s)</Badge>
+        </div>
+        {paymentReviewMessage && <p className="mt-3 text-sm font-semibold text-royal-gold">{paymentReviewMessage}</p>}
+        {paymentReviews.loading && <p className="mt-4 text-sm text-royal-muted">Carregando pagamentos para análise...</p>}
+        {paymentReviews.error && <ErrorBox message={paymentReviews.error} />}
+        {!paymentReviews.loading && paymentReviews.data?.length === 0 && (
+          <EmptyState>Nenhum pagamento aguardando confirmação.</EmptyState>
+        )}
+        <div className="mt-4 grid gap-3">
+          {paymentReviews.data?.map((review) => (
+            <div key={review.id} className="grid gap-3 rounded-lg border border-royal-line bg-black/25 p-3 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div className="flex items-start gap-3">
+                <Avatar src={review.photo_url} name={review.full_name} />
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="font-bold text-white">{review.full_name}</h4>
+                    <Badge tone="gold">Aguardando confirmação</Badge>
+                    <Badge>{review.belt}</Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-royal-muted">
+                    {review.reference_month} · vencimento {formatDate(review.due_date)} · enviado em {formatDateTime(review.requested_at)}
+                  </p>
+                  <p className="mt-2 text-lg font-black text-royal-gold">{formatMoney(review.value)}</p>
+                  {review.note && <p className="mt-1 text-sm text-zinc-300">Obs: {review.note}</p>}
+                </div>
+              </div>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button disabled={reviewingPaymentId === review.id} onClick={() => reviewStudentPayment(review, "approved")}>
+                  <CheckCircle2 size={16} /> Confirmar
+                </Button>
+                <Button variant="danger" disabled={reviewingPaymentId === review.id} onClick={() => reviewStudentPayment(review, "rejected")}>
+                  <Trash2 size={16} /> Recusar
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <Card>
         <h3 className="mb-4 text-lg font-bold text-white">Novo lançamento</h3>

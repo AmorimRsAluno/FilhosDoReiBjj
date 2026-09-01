@@ -7,8 +7,8 @@ async function main() {
   const email = (process.env.INITIAL_ADMIN_EMAIL ?? "admin@filhosdorei.local").toLowerCase();
   const password = process.env.INITIAL_ADMIN_PASSWORD ?? (process.env.NODE_ENV === "production" ? "" : "Admin@2026");
 
-  if (!email || !password || password.length < 8) {
-    throw new Error("Configure INITIAL_ADMIN_EMAIL e INITIAL_ADMIN_PASSWORD com pelo menos 8 caracteres.");
+  if (!email || !password || password.length < 6 || password.length > 12 || !/[^A-Za-z0-9]/.test(password)) {
+    throw new Error("Configure INITIAL_ADMIN_EMAIL e INITIAL_ADMIN_PASSWORD com 6 a 12 caracteres e pelo menos um caractere especial.");
   }
 
   const passwordHash = await bcrypt.hash(password, 10);

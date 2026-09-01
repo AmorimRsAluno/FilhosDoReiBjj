@@ -158,6 +158,17 @@ CREATE TABLE IF NOT EXISTS payments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS payment_review_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  payment_id UUID NOT NULL UNIQUE REFERENCES payments(id) ON DELETE CASCADE,
+  student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  note TEXT,
+  requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reviewed_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS financial_entries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
@@ -171,6 +182,8 @@ CREATE TABLE IF NOT EXISTS financial_entries (
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE financial_entries ADD COLUMN IF NOT EXISTS source_payment_id UUID REFERENCES payments(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS classes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -357,6 +370,8 @@ CREATE TABLE IF NOT EXISTS xp_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_student_status ON payments(student_id, status);
+CREATE INDEX IF NOT EXISTS idx_payment_review_requests_status ON payment_review_requests(status, requested_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_entries_source_payment ON financial_entries(source_payment_id) WHERE source_payment_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_students_plan ON students(plan_id);
 CREATE INDEX IF NOT EXISTS idx_membership_plans_status ON membership_plans(status);
 CREATE INDEX IF NOT EXISTS idx_financial_entries_date_type ON financial_entries(entry_date, type);

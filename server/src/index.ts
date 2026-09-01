@@ -115,7 +115,7 @@ const defaultRolePermissions: Record<string, string[]> = {
 const passwordSchema = z
   .string()
   .min(6, "Senha precisa ter no mínimo 6 caracteres.")
-  .max(8, "Senha precisa ter no máximo 8 caracteres.")
+  .max(12, "Senha precisa ter no máximo 12 caracteres.")
   .regex(/[^A-Za-z0-9]/, "Senha precisa ter pelo menos um caractere especial.");
 const phoneSchema = z
   .string()
@@ -667,6 +667,34 @@ app.put("/api/plans/:id", requireAuth, requireRole(["admin", "teacher", "finance
   res.json(result.rows[0]);
 });
 
+app.delete("/api/plans/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const plan = await client.query<{ id: string; name: string }>("SELECT id, name FROM membership_plans WHERE id = $1 FOR UPDATE", [
+      req.params.id
+    ]);
+    if (!plan.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Plano não encontrado." });
+    }
+
+    await client.query("UPDATE students SET plan_id = NULL WHERE plan_id = $1", [req.params.id]);
+    await client.query("UPDATE classes SET auto_plan_id = NULL WHERE auto_plan_id = $1", [req.params.id]);
+    await client.query("DELETE FROM class_allowed_plans WHERE plan_id = $1", [req.params.id]);
+    await client.query("DELETE FROM membership_plans WHERE id = $1", [req.params.id]);
+
+    await client.query("COMMIT");
+    res.status(204).end();
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
 app.patch("/api/plans/:id/checkin-schedule", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
   const parsed = planScheduleSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Horario de check-in invalido." });
@@ -900,7 +928,7 @@ app.put("/api/students-legacy-disabled/:id", requireAuth, requireRole(["admin", 
   res.json(result.rows[0]);
 });
 
-app.delete("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.delete("/api/students/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -1231,11 +1259,20 @@ app.post("/api/student/checkins-legacy", requireAuth, async (req, res) => {
 });
 
 app.get("/api/student/finance", requireAuth, async (req, res) => {
+  await ensureFinanceSchema();
   const studentId = await resolveStudentId(req.user?.id, req.query.studentId, req.user?.role);
   if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
 
   const result = await query(
-    "SELECT id, reference_month, due_date, paid_at, value, status, pix_code FROM payments WHERE student_id = $1 ORDER BY due_date DESC",
+    `SELECT p.id, p.reference_month, p.due_date, p.paid_at, p.value, p.status, p.pix_code,
+      pr.status AS review_status,
+      pr.requested_at AS review_requested_at,
+      pr.reviewed_at AS review_reviewed_at,
+      pr.note AS review_note
+     FROM payments p
+     LEFT JOIN payment_review_requests pr ON pr.payment_id = p.id
+     WHERE p.student_id = $1
+     ORDER BY p.due_date DESC`,
     [studentId]
   );
   res.json(result.rows);
@@ -1290,13 +1327,73 @@ app.post("/api/student/finance/advance", requireAuth, requireRole(["student"]), 
   res.status(201).json({ created, createdCount: created.length });
 });
 
+app.post("/api/student/finance/payments/:id/submit-review", requireAuth, requireRole(["student"]), async (req, res) => {
+  await ensureFinanceSchema();
+  const parsed = z.object({ note: z.string().max(500).optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Solicitação inválida." });
+
+  const studentId = await resolveStudentId(req.user?.id);
+  if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const payment = await client.query<{ id: string; status: string }>(
+      "SELECT id, status::text FROM payments WHERE id = $1 AND student_id = $2 FOR UPDATE",
+      [req.params.id, studentId]
+    );
+    const paymentRow = payment.rows[0];
+
+    if (!paymentRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Mensalidade não encontrada." });
+    }
+
+    if (paymentRow.status === "paid") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: "Esta mensalidade já está marcada como paga." });
+    }
+
+    const review = await client.query(
+      `INSERT INTO payment_review_requests (payment_id, student_id, status, note)
+       VALUES ($1, $2, 'pending', NULLIF($3, ''))
+       ON CONFLICT (payment_id)
+       DO UPDATE SET status = 'pending',
+                     note = NULLIF(EXCLUDED.note, ''),
+                     requested_at = now(),
+                     reviewed_at = NULL,
+                     reviewed_by = NULL
+       WHERE payment_review_requests.status <> 'approved'
+       RETURNING *`,
+      [paymentRow.id, studentId, parsed.data.note ?? ""]
+    );
+
+    if (!review.rows[0]) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: "Este pagamento já foi aprovado." });
+    }
+
+    await client.query("COMMIT");
+    res.status(201).json(review.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
 app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  await ensureFinanceSchema();
   const period = financePeriod(req.query.month);
   const [entries, payments, pendingPayments] = await Promise.all([
     query<{ type: string; total: string }>(
       `SELECT type, COALESCE(SUM(amount), 0) AS total
        FROM financial_entries
-       WHERE status = 'paid' AND entry_date >= $1::date AND entry_date < $2::date
+       WHERE status = 'paid'
+         AND source_payment_id IS NULL
+         AND entry_date >= $1::date AND entry_date < $2::date
        GROUP BY type`,
       [period.startDate, period.endDate]
     ),
@@ -1326,6 +1423,7 @@ app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "f
 });
 
 app.get("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  await ensureFinanceSchema();
   const period = financePeriod(req.query.month);
   const result = await query(
     `SELECT fe.*, u.name AS created_by_name
@@ -1339,7 +1437,75 @@ app.get("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "f
   res.json(result.rows);
 });
 
+app.get("/api/finance/payment-reviews", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  await ensureFinanceSchema();
+  const status = typeof req.query.status === "string" ? req.query.status : "pending";
+  const statusFilter = ["pending", "approved", "rejected"].includes(status) ? status : null;
+  const result = await query(
+    `SELECT pr.id, pr.payment_id, pr.student_id, pr.status, pr.note, pr.requested_at, pr.reviewed_at,
+      p.reference_month, p.due_date, p.value, p.pix_code, p.status::text AS payment_status,
+      s.full_name, s.photo_url, s.belt
+     FROM payment_review_requests pr
+     JOIN payments p ON p.id = pr.payment_id
+     JOIN students s ON s.id = pr.student_id
+     WHERE ($1::text IS NULL OR pr.status = $1)
+     ORDER BY pr.requested_at DESC
+     LIMIT 200`,
+    [statusFilter]
+  );
+  res.json(result.rows);
+});
+
+app.patch("/api/finance/payment-reviews/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  await ensureFinanceSchema();
+  const parsed = z.object({ status: z.enum(["approved", "rejected"]), note: z.string().max(500).optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const review = await client.query<{ id: string; payment_id: string; status: string }>(
+      "SELECT id, payment_id, status FROM payment_review_requests WHERE id = $1 FOR UPDATE",
+      [req.params.id]
+    );
+    const reviewRow = review.rows[0];
+
+    if (!reviewRow) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Solicitação de pagamento não encontrada." });
+    }
+
+    if (reviewRow.status !== "pending") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ message: "Solicitação já revisada." });
+    }
+
+    if (parsed.data.status === "approved") {
+      await client.query("UPDATE payments SET status = 'paid', paid_at = CURRENT_DATE WHERE id = $1", [reviewRow.payment_id]);
+      await syncPaymentFinancialEntry(client, reviewRow.payment_id, req.user?.id);
+    }
+
+    const updated = await client.query(
+      `UPDATE payment_review_requests
+       SET status = $1, note = NULLIF($2, ''), reviewed_at = now(), reviewed_by = $3
+       WHERE id = $4
+       RETURNING *`,
+      [parsed.data.status, parsed.data.note ?? "", req.user?.id, req.params.id]
+    );
+
+    await client.query("COMMIT");
+    res.json(updated.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
 app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  await ensureFinanceSchema();
   const format = String(req.params.format);
   if (!["xlsx", "pdf", "docx"].includes(format)) {
     return res.status(400).json({ message: "Formato inválido." });
@@ -1541,6 +1707,7 @@ app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teach
 });
 
 app.post("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  await ensureFinanceSchema();
   const parsed = z
     .object({
       type: z.enum(["income", "expense"]),
@@ -1577,6 +1744,7 @@ app.post("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "
 });
 
 app.patch("/api/finance/entries/:id/status", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  await ensureFinanceSchema();
   const parsed = z.object({ status: z.enum(["paid", "pending"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
 
@@ -1588,6 +1756,7 @@ app.patch("/api/finance/entries/:id/status", requireAuth, requireRole(["admin", 
 });
 
 app.delete("/api/finance/entries/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+  await ensureFinanceSchema();
   await query("DELETE FROM financial_entries WHERE id = $1", [req.params.id]);
   res.status(204).end();
 });
@@ -1597,6 +1766,7 @@ app.patch(
   requireAuth,
   requireRole(["admin", "teacher", "finance"]),
   async (req, res) => {
+    await ensureFinanceSchema();
     const parsed = z.object({ status: z.enum(["paid", "pending", "overdue"]) }).safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
 
@@ -1604,6 +1774,14 @@ app.patch(
       "UPDATE payments SET status = $1::payment_status, paid_at = CASE WHEN $1::payment_status = 'paid' THEN CURRENT_DATE ELSE paid_at END WHERE id = $2 RETURNING *",
       [parsed.data.status, req.params.id]
     );
+    if (!result.rows[0]) return res.status(404).json({ message: "Mensalidade não encontrada." });
+
+    if (parsed.data.status === "paid") {
+      await syncPaymentFinancialEntry(pool, String(req.params.id), req.user?.id);
+    } else {
+      await query("DELETE FROM financial_entries WHERE source_payment_id = $1", [req.params.id]);
+    }
+
     res.json(result.rows[0]);
   }
 );
@@ -2372,7 +2550,9 @@ async function getFinanceReport(month?: unknown) {
     query<{ type: string; total: string }>(
       `SELECT type, COALESCE(SUM(amount), 0) AS total
        FROM financial_entries
-       WHERE status = 'paid' AND entry_date >= $1::date AND entry_date < $2::date
+       WHERE status = 'paid'
+         AND source_payment_id IS NULL
+         AND entry_date >= $1::date AND entry_date < $2::date
        GROUP BY type`,
       [period.startDate, period.endDate]
     ),
@@ -2419,6 +2599,86 @@ async function getFinanceReport(month?: unknown) {
     },
     entries: entries.rows
   };
+}
+
+let financeSchemaPromise: Promise<void> | null = null;
+
+async function ensureFinanceSchema() {
+  if (!financeSchemaPromise) {
+    financeSchemaPromise = (async () => {
+      await query(
+        `CREATE TABLE IF NOT EXISTS payment_review_requests (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          payment_id UUID NOT NULL UNIQUE REFERENCES payments(id) ON DELETE CASCADE,
+          student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+          note TEXT,
+          requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          reviewed_at TIMESTAMPTZ,
+          reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL
+        )`
+      );
+      await query("ALTER TABLE financial_entries ADD COLUMN IF NOT EXISTS source_payment_id UUID REFERENCES payments(id) ON DELETE SET NULL");
+      await query(
+        "CREATE INDEX IF NOT EXISTS idx_payment_review_requests_status ON payment_review_requests(status, requested_at)"
+      );
+      await query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_financial_entries_source_payment ON financial_entries(source_payment_id) WHERE source_payment_id IS NOT NULL"
+      );
+    })().catch((error) => {
+      financeSchemaPromise = null;
+      throw error;
+    });
+  }
+
+  await financeSchemaPromise;
+}
+
+async function syncPaymentFinancialEntry(client: Pick<typeof pool, "query">, paymentId: string, createdBy?: string) {
+  const payment = await client.query<{
+    id: string;
+    reference_month: string;
+    value: string;
+    paid_at: string | null;
+    status: string;
+    full_name: string;
+  }>(
+    `SELECT p.id, p.reference_month, p.value, p.paid_at, p.status::text, s.full_name
+     FROM payments p
+     JOIN students s ON s.id = p.student_id
+     WHERE p.id = $1`,
+    [paymentId]
+  );
+  const item = payment.rows[0];
+  if (!item) return;
+
+  if (item.status !== "paid") {
+    await client.query("DELETE FROM financial_entries WHERE source_payment_id = $1", [paymentId]);
+    return;
+  }
+
+  await client.query(
+    `INSERT INTO financial_entries (
+      type, category, description, amount, entry_date, status, payment_method, notes, created_by, source_payment_id
+     )
+     VALUES ('income', 'Mensalidade', $1, $2, COALESCE($3::date, CURRENT_DATE), 'paid', 'PIX', $4, $5, $6)
+     ON CONFLICT (source_payment_id) WHERE source_payment_id IS NOT NULL
+     DO UPDATE SET description = EXCLUDED.description,
+                   amount = EXCLUDED.amount,
+                   entry_date = EXCLUDED.entry_date,
+                   status = 'paid',
+                   payment_method = EXCLUDED.payment_method,
+                   notes = EXCLUDED.notes,
+                   created_by = COALESCE(financial_entries.created_by, EXCLUDED.created_by)`,
+    [
+      `Mensalidade ${item.reference_month} - ${item.full_name}`,
+      item.value,
+      item.paid_at,
+      "Pagamento confirmado pela análise do financeiro.",
+      createdBy ?? null,
+      paymentId
+    ]
+  );
 }
 
 function onlyDigits(value: string) {

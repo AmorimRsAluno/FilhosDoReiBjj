@@ -166,6 +166,28 @@ export type Payment = {
   value: string;
   status: "paid" | "pending" | "overdue";
   pix_code: string;
+  review_status?: "pending" | "approved" | "rejected" | null;
+  review_requested_at?: string | null;
+  review_reviewed_at?: string | null;
+  review_note?: string | null;
+};
+
+export type PaymentReview = {
+  id: string;
+  payment_id: string;
+  student_id: string;
+  status: "pending" | "approved" | "rejected";
+  note: string | null;
+  requested_at: string;
+  reviewed_at: string | null;
+  reference_month: string;
+  due_date: string;
+  value: string;
+  pix_code: string;
+  payment_status: "paid" | "pending" | "overdue";
+  full_name: string;
+  photo_url: string;
+  belt: string;
 };
 
 export type FinanceSummary = {
