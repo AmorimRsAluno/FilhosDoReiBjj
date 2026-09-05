@@ -5,7 +5,7 @@ async function main() {
   const name = process.env.INITIAL_ADMIN_NAME ?? "Admin";
   const username = process.env.INITIAL_ADMIN_USERNAME ?? "Admin";
   const email = (process.env.INITIAL_ADMIN_EMAIL ?? "admin@filhosdorei.local").toLowerCase();
-  const password = process.env.INITIAL_ADMIN_PASSWORD ?? (process.env.NODE_ENV === "production" ? "" : "Admin@2026");
+  const password = process.env.INITIAL_ADMIN_PASSWORD ?? "";
 
   if (!email || !password || password.length < 6 || password.length > 12 || !/[^A-Za-z0-9]/.test(password)) {
     throw new Error("Configure INITIAL_ADMIN_EMAIL e INITIAL_ADMIN_PASSWORD com 6 a 12 caracteres e pelo menos um caractere especial.");
@@ -21,7 +21,7 @@ async function main() {
     [name, username, email, passwordHash, `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(name)}`]
   );
 
-  const permissions = ["dashboard", "students", "finance", "plans", "attendance", "techniques", "ranking", "store", "competitions", "users", "registrations"];
+  const permissions = ["dashboard", "students", "finance", "plans", "attendance", "checkins", "techniques", "ranking", "store", "competitions", "users", "registrations"];
   await pool.query("DELETE FROM user_permissions WHERE user_id = $1", [result.rows[0].id]);
   for (const permission of permissions) {
     await pool.query("INSERT INTO user_permissions (user_id, permission_key) VALUES ($1, $2) ON CONFLICT DO NOTHING", [

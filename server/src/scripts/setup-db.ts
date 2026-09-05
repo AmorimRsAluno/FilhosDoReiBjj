@@ -16,11 +16,19 @@ const avatars = {
 };
 
 const rolePermissions: Record<string, string[]> = {
-  admin: ["dashboard", "students", "finance", "plans", "attendance", "techniques", "ranking", "store", "competitions", "users", "registrations"],
-  teacher: ["dashboard", "students", "plans", "attendance", "techniques", "ranking", "store", "competitions", "registrations"],
+  admin: ["dashboard", "students", "finance", "plans", "attendance", "checkins", "techniques", "ranking", "store", "competitions", "users", "registrations"],
+  teacher: ["dashboard", "students", "plans", "attendance", "checkins", "techniques", "ranking", "store", "competitions", "registrations"],
   finance: ["dashboard", "finance", "plans"],
   student: ["dashboard", "finance", "techniques", "ranking", "store", "competitions"]
 };
+
+function readDemoPassword(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value || value.length < 6 || value.length > 12 || !/[^A-Za-z0-9]/.test(value)) {
+    throw new Error(`Defina ${name} com 6 a 12 caracteres e pelo menos um caractere especial antes de rodar db:setup.`);
+  }
+  return value;
+}
 
 async function upsertUser(name: string, email: string, role: string, passwordHash: string, avatarUrl: string, username = "", phone = "") {
   const result = await pool.query<{ id: string }>(
@@ -42,11 +50,15 @@ async function grantDefaultPermissions(userId: string, role: string) {
 }
 
 async function main() {
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEMO_SEED !== "true") {
+    throw new Error("db:setup insere dados demonstrativos e não deve rodar em produção sem ALLOW_DEMO_SEED=true.");
+  }
+
   const schema = await readFile(schemaPath, "utf8");
   await pool.query(schema);
 
-  const passwordHash = await bcrypt.hash("123456", 10);
-  const adminPasswordHash = await bcrypt.hash("Admin@2026", 10);
+  const passwordHash = await bcrypt.hash(readDemoPassword("DEMO_PASSWORD"), 10);
+  const adminPasswordHash = await bcrypt.hash(readDemoPassword("INITIAL_ADMIN_PASSWORD"), 10);
   const adminId = await upsertUser("Admin", "admin@filhosdorei.local", "admin", adminPasswordHash, avatars.admin, "Admin");
   const teacherId = await upsertUser(
     "Professor Wilian",
@@ -296,7 +308,7 @@ async function main() {
   );
 
   console.log("Banco configurado com schema e dados demo.");
-  console.log("Logins demo: Admin / Admin@2026 | ana@aluno.com / 123456");
+  console.log("Logins demo configurados com as senhas informadas por variáveis de ambiente.");
 }
 
 main()

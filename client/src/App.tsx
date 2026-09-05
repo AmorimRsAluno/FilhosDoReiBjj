@@ -2468,6 +2468,8 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
     null;
   const selectedVideoKind = techniqueVideoKind(selectedTechnique?.video_url);
   const selectedMediaUrl = selectedTechnique?.video_url ? mediaUrl(selectedTechnique.video_url) : "";
+  const selectedProtectedMediaUrl = useAuthenticatedMediaUrl(selectedVideoKind === "mp4" ? selectedTechnique?.video_url : "", token);
+  const selectedPlayerUrl = selectedVideoKind === "mp4" ? selectedProtectedMediaUrl : selectedMediaUrl;
   const selectedYoutubeEmbedUrl = selectedVideoKind === "youtube" ? youtubeEmbedUrl(selectedMediaUrl) : "";
   const stats = {
     total: techniques.length,
@@ -2739,27 +2741,33 @@ function TechniquesPanel({ token, isAdmin = false }: { token: string; isAdmin?: 
                 <h3 className="mt-1 text-lg font-black text-white">{selectedTechnique?.name ?? "Selecione uma técnica"}</h3>
                 {selectedTechnique && selectedVideoKind === "mp4" ? (
                   <div className="mt-4 overflow-hidden rounded-lg border border-royal-line bg-black/45">
-                    <video
-                      key={selectedTechnique.id}
-                      className="aspect-video w-full bg-black object-contain"
-                      src={selectedMediaUrl}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      onLoadedMetadata={() => setVideoLoadMessage("Vídeo carregado. Toque em play para assistir.")}
-                      onError={() => setVideoLoadMessage("Não foi possível carregar o vídeo no player. Use Abrir vídeo ou Baixar MP4.")}
-                    />
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
-                      <span className="text-xs font-semibold text-royal-muted">{selectedTechnique.category}</span>
-                      <div className="flex flex-wrap gap-3">
-                        <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={selectedMediaUrl} target="_blank" rel="noreferrer">
-                          <Eye size={14} /> Abrir vídeo
-                        </a>
-                        <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={selectedMediaUrl} download target="_blank" rel="noreferrer">
-                          <Download size={14} /> Baixar MP4
-                        </a>
-                      </div>
-                    </div>
+                    {selectedPlayerUrl ? (
+                      <>
+                        <video
+                          key={selectedTechnique.id}
+                          className="aspect-video w-full bg-black object-contain"
+                          src={selectedPlayerUrl}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          onLoadedMetadata={() => setVideoLoadMessage("Vídeo carregado. Toque em play para assistir.")}
+                          onError={() => setVideoLoadMessage("Não foi possível carregar o vídeo no player.")}
+                        />
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-royal-line px-3 py-2">
+                          <span className="text-xs font-semibold text-royal-muted">{selectedTechnique.category}</span>
+                          <div className="flex flex-wrap gap-3">
+                            <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={selectedPlayerUrl} target="_blank" rel="noreferrer">
+                              <Eye size={14} /> Abrir vídeo
+                            </a>
+                            <a className="inline-flex items-center gap-2 text-sm font-semibold text-royal-gold hover:text-yellow-200" href={selectedPlayerUrl} download target="_blank" rel="noreferrer">
+                              <Download size={14} /> Baixar MP4
+                            </a>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <EmptyState>Carregando vídeo protegido...</EmptyState>
+                    )}
                   </div>
                 ) : selectedTechnique && selectedVideoKind === "youtube" && selectedYoutubeEmbedUrl ? (
                   <div className="mt-4 overflow-hidden rounded-lg border border-royal-line bg-black/45">
@@ -3165,7 +3173,7 @@ function StorePanel({ token, isAdmin = false }: { token: string; isAdmin?: boole
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {data?.map((product) => (
           <Card key={product.id} className="overflow-hidden p-0">
-            <img className="h-48 w-full object-cover" src={product.image_url ? mediaUrl(product.image_url) : "/icon.svg"} alt={product.name} />
+            <ProductImage src={product.image_url} name={product.name} token={token} />
             <div className="p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -3416,6 +3424,22 @@ function Avatar({ src, name, size = "sm" }: { src: string; name: string; size?: 
       className={`${size === "lg" ? "h-24 w-24" : "h-12 w-12"} rounded-lg border border-royal-line bg-black object-cover`}
       src={src || `https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(name)}`}
       alt=""
+    />
+  );
+}
+
+function ProductImage({ src, name, token }: { src: string; name: string; token: string }) {
+  const resolvedSrc = useAuthenticatedMediaUrl(src, token);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => setFailed(false), [resolvedSrc]);
+
+  return (
+    <img
+      className="h-48 w-full object-cover"
+      src={!failed && resolvedSrc ? resolvedSrc : "/icon.svg"}
+      alt={name}
+      onError={() => setFailed(true)}
     />
   );
 }
@@ -3738,6 +3762,52 @@ function mediaUrl(value?: string | null) {
   if (/^(https?:|data:|blob:)/.test(value)) return value;
   const apiOrigin = API_URL.replace(/\/api\/?$/, "");
   return `${apiOrigin}${value.startsWith("/") ? value : `/${value}`}`;
+}
+
+function isProtectedApiMedia(value?: string | null) {
+  const raw = value?.trim() ?? "";
+  if (!raw) return false;
+  const apiOrigin = API_URL.replace(/\/api\/?$/, "");
+  const resolved = mediaUrl(raw);
+  return (
+    raw.startsWith("/api/techniques/video/") ||
+    raw.startsWith("/api/products/image/") ||
+    resolved.startsWith(`${apiOrigin}/api/techniques/video/`) ||
+    resolved.startsWith(`${apiOrigin}/api/products/image/`)
+  );
+}
+
+function useAuthenticatedMediaUrl(value: string | null | undefined, token: string) {
+  const [objectUrl, setObjectUrl] = useState("");
+  const resolvedUrl = value ? mediaUrl(value) : "";
+  const needsAuth = isProtectedApiMedia(value);
+
+  useEffect(() => {
+    let cancelled = false;
+    let nextObjectUrl = "";
+    setObjectUrl("");
+
+    if (!resolvedUrl || !needsAuth) return;
+
+    fetch(resolvedUrl, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Mídia protegida indisponível.");
+        const blob = await response.blob();
+        nextObjectUrl = URL.createObjectURL(blob);
+        if (cancelled) URL.revokeObjectURL(nextObjectUrl);
+        else setObjectUrl(nextObjectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setObjectUrl("");
+      });
+
+    return () => {
+      cancelled = true;
+      if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
+    };
+  }, [needsAuth, resolvedUrl, token]);
+
+  return needsAuth ? objectUrl : resolvedUrl;
 }
 
 function techniqueVideoKind(value?: string | null) {

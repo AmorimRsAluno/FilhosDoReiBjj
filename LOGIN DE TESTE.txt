@@ -1,3 +1,7 @@
-Entre como aluno: ana@aluno.com / 123456.
+As senhas demonstrativas nao ficam mais salvas neste arquivo.
 
-Entre como admin: Admin / Admin@2026.
+Ao rodar o ABRIR_DEMO_CLIENTE.bat ou npm.cmd run db:setup, use as senhas definidas localmente para:
+
+- Admin: usuario Admin
+- Professor: professor@filhosdorei.com
+- Aluno: ana@aluno.com

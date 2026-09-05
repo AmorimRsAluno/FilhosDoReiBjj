@@ -1,4 +1,4 @@
-# Filhos do Rei BJJ - William Lago
+# Filhos do Rei BJJ - Wilian Lago
 
 MVP funcional para gestão de academia de jiu-jitsu com app do aluno e painel administrativo.
 
@@ -24,6 +24,8 @@ No PowerShell desta máquina, use `npm.cmd`:
 
 ```powershell
 npm.cmd install
+$env:INITIAL_ADMIN_PASSWORD="<senha-admin-demo>"
+$env:DEMO_PASSWORD="<senha-demo-alunos-professor>"
 npm.cmd run db:setup
 npm.cmd run dev
 ```
@@ -39,11 +41,15 @@ Para apresentação ao cliente, também é possível abrir com duplo clique. O a
 ABRIR_DEMO_CLIENTE.bat
 ```
 
-## Logins demo
+## Credenciais demo
 
-- Admin: `Admin` / `Admin@2026`
-- Professor: `professor@filhosdorei.com` / `123456`
-- Aluno: `ana@aluno.com` / `123456`
+O repositório não guarda senhas demonstrativas. Antes de rodar `db:setup`, defina `INITIAL_ADMIN_PASSWORD` e `DEMO_PASSWORD` com 6 a 12 caracteres e pelo menos um caractere especial.
+
+Usuários demonstrativos criados pelo seed:
+
+- Admin: usuário `Admin`
+- Professor: `professor@filhosdorei.com`
+- Aluno: `ana@aluno.com`
 
 ## Funcionalidades do MVP
 

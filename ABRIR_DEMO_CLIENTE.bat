@@ -9,7 +9,7 @@ set "MOBILE_URL=http://localhost:5173/demo-mobile.html"
 
 echo.
 echo ================================================
-echo  FILHOS DO REI BJJ - WILLIAM LAGO
+echo  FILHOS DO REI BJJ - WILIAN LAGO
 echo  Abrir sistema demonstrativo
 echo ================================================
 echo.
@@ -58,6 +58,20 @@ if not exist "node_modules\" (
   )
 )
 
+if "%INITIAL_ADMIN_PASSWORD%"=="" (
+  echo.
+  echo Informe uma senha temporaria para o usuario Admin demo.
+  echo A senha precisa ter de 6 a 12 caracteres e pelo menos um caractere especial.
+  set /p "INITIAL_ADMIN_PASSWORD=Senha Admin demo: "
+)
+
+if "%DEMO_PASSWORD%"=="" (
+  echo.
+  echo Informe uma senha temporaria para professor e alunos demo.
+  echo A senha precisa ter de 6 a 12 caracteres e pelo menos um caractere especial.
+  set /p "DEMO_PASSWORD=Senha demo geral: "
+)
+
 echo Preparando banco de dados demonstrativo...
 call npm.cmd run db:setup
 if errorlevel 1 (
@@ -97,8 +111,8 @@ echo Abrindo: %DEMO_URL%
 start "" "%DEMO_URL%"
 echo.
 echo Logins para demonstracao:
-echo   Admin: admin@filhosdorei.com / 123456
-echo   Aluno: ana@aluno.com / 123456
+echo   Admin: usuario Admin com a senha informada ao abrir este BAT.
+echo   Aluno: ana@aluno.com com a senha demo geral informada ao abrir este BAT.
 echo.
 echo Para encerrar depois, feche a janela "Filhos do Rei BJJ - Servidor".
 echo.

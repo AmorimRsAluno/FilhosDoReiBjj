@@ -16,6 +16,10 @@
     "android:open": "npx.cmd cap open android",
     "db:setup": "npm.cmd run db:setup -w server"
   },
+  "overrides": {
+    "browserslist": "4.28.9",
+    "qs": "6.16.0"
+  },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",
     "concurrently": "^9.2.1"

@@ -112,6 +112,39 @@ const defaultRolePermissions: Record<string, string[]> = {
   finance: ["dashboard", "finance", "plans"],
   student: ["dashboard", "finance", "techniques", "ranking", "store", "competitions"]
 };
+type PermissionKey = (typeof permissionKeys)[number];
+
+async function hasStoredPermission(user: express.Request["user"], permission: PermissionKey) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+
+  const result = await query<{ exists: number }>(
+    "SELECT 1 AS exists FROM user_permissions WHERE user_id = $1 AND permission_key = $2 LIMIT 1",
+    [user.id, permission]
+  );
+  return Boolean(result.rows[0]);
+}
+
+async function hasAnyStoredPermission(user: express.Request["user"], permissions: PermissionKey[]) {
+  for (const permission of permissions) {
+    if (await hasStoredPermission(user, permission)) return true;
+  }
+  return false;
+}
+
+function requirePermission(permission: PermissionKey) {
+  return async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (await hasStoredPermission(req.user, permission)) return next();
+    return res.status(403).json({ message: "Permissão insuficiente para esta função." });
+  };
+}
+
+function requireAnyPermission(permissions: PermissionKey[]) {
+  return async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (await hasAnyStoredPermission(req.user, permissions)) return next();
+    return res.status(403).json({ message: "Permissão insuficiente para esta função." });
+  };
+}
 const passwordSchema = z
   .string()
   .min(6, "Senha precisa ter no mínimo 6 caracteres.")
@@ -295,7 +328,7 @@ app.post("/api/auth/password-reset", authLimiter, async (req, res) => {
   res.status(201).json(result.rows[0]);
 });
 
-app.get("/api/admin/registration-requests", requireAuth, requireRole(["admin"]), async (_req, res) => {
+app.get("/api/admin/registration-requests", requireAuth, requireRole(["admin"]), requirePermission("registrations"), async (_req, res) => {
   const result = await query(
     `SELECT id, full_name, email, phone, status, requested_at, reviewed_at, note
      FROM registration_requests
@@ -304,7 +337,7 @@ app.get("/api/admin/registration-requests", requireAuth, requireRole(["admin"]),
   res.json(result.rows);
 });
 
-app.patch("/api/admin/registration-requests/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+app.patch("/api/admin/registration-requests/:id", requireAuth, requireRole(["admin"]), requirePermission("registrations"), async (req, res) => {
   const parsed = z.object({ status: z.enum(["approved", "rejected"]), note: z.string().optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
 
@@ -389,7 +422,7 @@ app.patch("/api/admin/registration-requests/:id", requireAuth, requireRole(["adm
   }
 });
 
-app.get("/api/admin/password-reset-requests", requireAuth, requireRole(["admin"]), async (_req, res) => {
+app.get("/api/admin/password-reset-requests", requireAuth, requireRole(["admin"]), requirePermission("users"), async (_req, res) => {
   const result = await query(
     `SELECT pr.id, pr.email, pr.phone, pr.status, pr.requested_at, pr.reviewed_at, pr.note,
       u.id AS user_id, u.name AS user_name
@@ -400,7 +433,7 @@ app.get("/api/admin/password-reset-requests", requireAuth, requireRole(["admin"]
   res.json(result.rows);
 });
 
-app.patch("/api/admin/password-reset-requests/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+app.patch("/api/admin/password-reset-requests/:id", requireAuth, requireRole(["admin"]), requirePermission("users"), async (req, res) => {
   const parsed = z
     .object({ status: z.enum(["resolved", "rejected"]), newPassword: passwordSchema.optional(), note: z.string().optional() })
     .safeParse(req.body);
@@ -467,7 +500,7 @@ app.patch("/api/admin/password-reset-requests/:id", requireAuth, requireRole(["a
   }
 });
 
-app.get("/api/admin/users", requireAuth, requireRole(["admin"]), async (_req, res) => {
+app.get("/api/admin/users", requireAuth, requireRole(["admin"]), requirePermission("users"), async (_req, res) => {
   const result = await query(
     `SELECT u.id, u.name, u.username, u.email, u.phone, u.role::text, u.created_at,
       COALESCE(array_agg(up.permission_key) FILTER (WHERE up.permission_key IS NOT NULL), '{}') AS permissions
@@ -479,7 +512,7 @@ app.get("/api/admin/users", requireAuth, requireRole(["admin"]), async (_req, re
   res.json(result.rows);
 });
 
-app.patch("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+app.patch("/api/admin/users/:id", requireAuth, requireRole(["admin"]), requirePermission("users"), async (req, res) => {
   const parsed = z
     .object({
       name: z.string().min(2),
@@ -530,7 +563,7 @@ app.patch("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (re
   }
 });
 
-app.delete("/api/admin/users/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+app.delete("/api/admin/users/:id", requireAuth, requireRole(["admin"]), requirePermission("users"), async (req, res) => {
   if (req.user?.id === req.params.id) {
     return res.status(400).json({ message: "Não é possível excluir o próprio usuário logado." });
   }
@@ -566,6 +599,7 @@ app.get(
   "/api/admin/dashboard",
   requireAuth,
   requireRole(["admin", "teacher", "finance"]),
+  requirePermission("dashboard"),
   async (_req, res) => {
     const [studentsCount, revenue, overdue, attendance, newStudents, payments, evolution] =
       await Promise.all([
@@ -606,7 +640,7 @@ app.get(
   }
 );
 
-app.get("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]), async (_req, res) => {
+app.get("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("plans"), async (_req, res) => {
   const result = await query(
     `SELECT id, name, audience, monthly_value, due_day, billing_cycle, status,
       to_char(checkin_start_time, 'HH24:MI') AS checkin_start_time,
@@ -619,7 +653,7 @@ app.get("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]),
   res.json(result.rows);
 });
 
-app.post("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.post("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("plans"), async (req, res) => {
   const parsed = planPayloadSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ message: "Dados do plano inválidos." });
@@ -641,7 +675,7 @@ app.post("/api/plans", requireAuth, requireRole(["admin", "teacher", "finance"])
   res.status(201).json(result.rows[0]);
 });
 
-app.put("/api/plans/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.put("/api/plans/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("plans"), async (req, res) => {
   const parsed = planPayloadSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ message: "Dados do plano inválidos." });
@@ -667,7 +701,7 @@ app.put("/api/plans/:id", requireAuth, requireRole(["admin", "teacher", "finance
   res.json(result.rows[0]);
 });
 
-app.delete("/api/plans/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+app.delete("/api/plans/:id", requireAuth, requireRole(["admin"]), requirePermission("plans"), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -695,7 +729,7 @@ app.delete("/api/plans/:id", requireAuth, requireRole(["admin"]), async (req, re
   }
 });
 
-app.patch("/api/plans/:id/checkin-schedule", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.patch("/api/plans/:id/checkin-schedule", requireAuth, requireRole(["admin", "teacher"]), requirePermission("plans"), async (req, res) => {
   const parsed = planScheduleSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Horario de check-in invalido." });
 
@@ -723,7 +757,7 @@ app.patch("/api/plans/:id/checkin-schedule", requireAuth, requireRole(["admin", 
   res.json(result.rows[0]);
 });
 
-app.get("/api/students", requireAuth, requireRole(["admin", "teacher", "finance"]), async (_req, res) => {
+app.get("/api/students", requireAuth, requireRole(["admin", "teacher"]), requirePermission("students"), async (_req, res) => {
   const result = await query(
     `SELECT s.*,
       mp.name AS plan_name,
@@ -751,7 +785,7 @@ app.get("/api/students", requireAuth, requireRole(["admin", "teacher", "finance"
   res.json(result.rows);
 });
 
-app.post("/api/students", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/students", requireAuth, requireRole(["admin", "teacher"]), requirePermission("students"), async (req, res) => {
   const parsed = studentPayloadSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -800,7 +834,7 @@ app.post("/api/students", requireAuth, requireRole(["admin", "teacher"]), async 
   }
 });
 
-app.put("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.put("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), requirePermission("students"), async (req, res) => {
   const parsed = studentPayloadSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -855,7 +889,7 @@ app.put("/api/students/:id", requireAuth, requireRole(["admin", "teacher"]), asy
   }
 });
 
-app.post("/api/students-legacy-disabled", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/students-legacy-disabled", requireAuth, requireRole(["admin", "teacher"]), requirePermission("students"), async (req, res) => {
   const parsed = z
     .object({
       fullName: z.string().min(3),
@@ -891,7 +925,7 @@ app.post("/api/students-legacy-disabled", requireAuth, requireRole(["admin", "te
   res.status(201).json(result.rows[0]);
 });
 
-app.put("/api/students-legacy-disabled/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.put("/api/students-legacy-disabled/:id", requireAuth, requireRole(["admin", "teacher"]), requirePermission("students"), async (req, res) => {
   const parsed = z
     .object({
       fullName: z.string().min(3),
@@ -928,7 +962,7 @@ app.put("/api/students-legacy-disabled/:id", requireAuth, requireRole(["admin", 
   res.json(result.rows[0]);
 });
 
-app.delete("/api/students/:id", requireAuth, requireRole(["admin"]), async (req, res) => {
+app.delete("/api/students/:id", requireAuth, requireRole(["admin"]), requirePermission("students"), async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -956,7 +990,15 @@ app.delete("/api/students/:id", requireAuth, requireRole(["admin"]), async (req,
 });
 
 app.get("/api/student/dashboard", requireAuth, async (req, res) => {
-  const studentId = await resolveStudentId(req.user?.id, req.query.studentId, req.user?.role);
+  if (req.user?.role === "student" && !(await hasStoredPermission(req.user, "dashboard"))) {
+    return res.status(403).json({ message: "Permissão insuficiente para consultar dashboard." });
+  }
+
+  if (req.user?.role !== "student" && !(await hasStoredPermission(req.user, "students"))) {
+    return res.status(403).json({ message: "Permissão insuficiente para consultar alunos." });
+  }
+
+  const studentId = await resolveStudentId(req.user?.id, req.query.studentId, req.user?.role, ["admin", "teacher"]);
   const studentResult = await query<{
     id: string;
     full_name: string;
@@ -1041,7 +1083,7 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
   });
 });
 
-app.patch("/api/student/photo", requireAuth, requireRole(["student"]), uploadLimiter, async (req, res) => {
+app.patch("/api/student/photo", requireAuth, requireRole(["student"]), requirePermission("dashboard"), uploadLimiter, async (req, res) => {
   const parsed = z
     .object({
       photoUrl: z.string().regex(/^data:image\/(png|jpeg|jpg|webp);base64,/).max(2_500_000)
@@ -1068,6 +1110,14 @@ app.patch("/api/student/photo", requireAuth, requireRole(["student"]), uploadLim
 });
 
 app.post("/api/student/checkins", requireAuth, async (req, res, next) => {
+  if (req.user?.role === "student" && !(await hasStoredPermission(req.user, "dashboard"))) {
+    return res.status(403).json({ message: "Permissão insuficiente para registrar check-ins." });
+  }
+
+  if (req.user?.role !== "student" && !(await hasAnyStoredPermission(req.user, ["checkins", "attendance"]))) {
+    return res.status(403).json({ message: "Permissão insuficiente para registrar check-ins." });
+  }
+
   const studentId = await resolveStudentId(req.user?.id, req.body.studentId, req.user?.role, ["admin", "teacher"]);
   if (!studentId) return res.status(404).json({ message: "Aluno nao encontrado." });
 
@@ -1175,6 +1225,14 @@ app.post("/api/student/checkins", requireAuth, async (req, res, next) => {
 });
 
 app.post("/api/student/checkins-legacy", requireAuth, async (req, res) => {
+  if (req.user?.role === "student" && !(await hasStoredPermission(req.user, "dashboard"))) {
+    return res.status(403).json({ message: "Permissão insuficiente para registrar check-ins." });
+  }
+
+  if (req.user?.role !== "student" && !(await hasAnyStoredPermission(req.user, ["checkins", "attendance"]))) {
+    return res.status(403).json({ message: "Permissão insuficiente para registrar check-ins." });
+  }
+
   const studentId = await resolveStudentId(req.user?.id, req.body.studentId, req.user?.role, ["admin", "teacher"]);
   if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
 
@@ -1260,7 +1318,11 @@ app.post("/api/student/checkins-legacy", requireAuth, async (req, res) => {
 
 app.get("/api/student/finance", requireAuth, async (req, res) => {
   await ensureFinanceSchema();
-  const studentId = await resolveStudentId(req.user?.id, req.query.studentId, req.user?.role);
+  if (!(await hasStoredPermission(req.user, "finance"))) {
+    return res.status(403).json({ message: "Permissão insuficiente para consultar financeiro." });
+  }
+
+  const studentId = await resolveStudentId(req.user?.id, req.query.studentId, req.user?.role, ["admin", "teacher"]);
   if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
 
   const result = await query(
@@ -1278,7 +1340,7 @@ app.get("/api/student/finance", requireAuth, async (req, res) => {
   res.json(result.rows);
 });
 
-app.post("/api/student/finance/advance", requireAuth, requireRole(["student"]), async (req, res) => {
+app.post("/api/student/finance/advance", requireAuth, requireRole(["student"]), requirePermission("finance"), async (req, res) => {
   const parsed = z.object({ months: z.coerce.number().int().min(1).max(6) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Informe de 1 a 6 mensalidades adiantadas." });
 
@@ -1327,7 +1389,7 @@ app.post("/api/student/finance/advance", requireAuth, requireRole(["student"]), 
   res.status(201).json({ created, createdCount: created.length });
 });
 
-app.post("/api/student/finance/payments/:id/submit-review", requireAuth, requireRole(["student"]), async (req, res) => {
+app.post("/api/student/finance/payments/:id/submit-review", requireAuth, requireRole(["student"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   const parsed = z.object({ note: z.string().max(500).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Solicitação inválida." });
@@ -1384,7 +1446,7 @@ app.post("/api/student/finance/payments/:id/submit-review", requireAuth, require
   }
 });
 
-app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   const period = financePeriod(req.query.month);
   const [entries, payments, pendingPayments] = await Promise.all([
@@ -1422,7 +1484,7 @@ app.get("/api/finance/summary", requireAuth, requireRole(["admin", "teacher", "f
   });
 });
 
-app.get("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.get("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   const period = financePeriod(req.query.month);
   const result = await query(
@@ -1437,7 +1499,7 @@ app.get("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "f
   res.json(result.rows);
 });
 
-app.get("/api/finance/payment-reviews", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.get("/api/finance/payment-reviews", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   const status = typeof req.query.status === "string" ? req.query.status : "pending";
   const statusFilter = ["pending", "approved", "rejected"].includes(status) ? status : null;
@@ -1456,7 +1518,7 @@ app.get("/api/finance/payment-reviews", requireAuth, requireRole(["admin", "teac
   res.json(result.rows);
 });
 
-app.patch("/api/finance/payment-reviews/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.patch("/api/finance/payment-reviews/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   const parsed = z.object({ status: z.enum(["approved", "rejected"]), note: z.string().max(500).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
@@ -1504,7 +1566,7 @@ app.patch("/api/finance/payment-reviews/:id", requireAuth, requireRole(["admin",
   }
 });
 
-app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   const format = String(req.params.format);
   if (!["xlsx", "pdf", "docx"].includes(format)) {
@@ -1706,7 +1768,7 @@ app.get("/api/finance/report/:format", requireAuth, requireRole(["admin", "teach
   pdf.end();
 });
 
-app.post("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.post("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   const parsed = z
     .object({
@@ -1743,7 +1805,7 @@ app.post("/api/finance/entries", requireAuth, requireRole(["admin", "teacher", "
   res.status(201).json(result.rows[0]);
 });
 
-app.patch("/api/finance/entries/:id/status", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.patch("/api/finance/entries/:id/status", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   const parsed = z.object({ status: z.enum(["paid", "pending"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
@@ -1755,7 +1817,7 @@ app.patch("/api/finance/entries/:id/status", requireAuth, requireRole(["admin", 
   res.json(result.rows[0]);
 });
 
-app.delete("/api/finance/entries/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), async (req, res) => {
+app.delete("/api/finance/entries/:id", requireAuth, requireRole(["admin", "teacher", "finance"]), requirePermission("finance"), async (req, res) => {
   await ensureFinanceSchema();
   await query("DELETE FROM financial_entries WHERE id = $1", [req.params.id]);
   res.status(204).end();
@@ -1765,6 +1827,7 @@ app.patch(
   "/api/payments/:id/status",
   requireAuth,
   requireRole(["admin", "teacher", "finance"]),
+  requirePermission("finance"),
   async (req, res) => {
     await ensureFinanceSchema();
     const parsed = z.object({ status: z.enum(["paid", "pending", "overdue"]) }).safeParse(req.body);
@@ -1786,9 +1849,9 @@ app.patch(
   }
 );
 
-app.get("/api/techniques", requireAuth, async (req, res) => {
+app.get("/api/techniques", requireAuth, requirePermission("techniques"), async (req, res) => {
   const requestedStudentId = req.user?.role === "student" ? undefined : req.query.studentId;
-  const studentId = await resolveStudentId(req.user?.id, requestedStudentId, req.user?.role);
+  const studentId = await resolveStudentId(req.user?.id, requestedStudentId, req.user?.role, ["admin", "teacher"]);
   const result = await query(
     `SELECT t.id, t.category, t.name, t.description, t.video_url, t.notes,
       COALESCE(st.status::text, 'not_learned') AS status
@@ -1800,7 +1863,7 @@ app.get("/api/techniques", requireAuth, async (req, res) => {
   res.json(result.rows);
 });
 
-app.post("/api/techniques/video", requireAuth, requireRole(["admin", "teacher"]), uploadLimiter, async (req, res) => {
+app.post("/api/techniques/video", requireAuth, requireRole(["admin", "teacher"]), requirePermission("techniques"), uploadLimiter, async (req, res) => {
   const parsed = z
     .object({
       fileName: z.string().min(1).max(180),
@@ -1827,7 +1890,7 @@ app.post("/api/techniques/video", requireAuth, requireRole(["admin", "teacher"])
   res.status(201).json({ videoUrl, originalName: parsed.data.fileName });
 });
 
-app.get("/api/techniques/video/:id/file", async (req, res) => {
+app.get("/api/techniques/video/:id/file", requireAuth, requirePermission("techniques"), async (req, res) => {
   const result = await query<{
     original_name: string;
     mime_type: string;
@@ -1843,7 +1906,7 @@ app.get("/api/techniques/video/:id/file", async (req, res) => {
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Content-Type", video.mime_type);
   res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
-  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.setHeader("Cache-Control", "private, max-age=300");
 
   if (range) {
     const match = range.match(/bytes=(\d*)-(\d*)/);
@@ -1867,7 +1930,7 @@ app.get("/api/techniques/video/:id/file", async (req, res) => {
   res.end(video.content);
 });
 
-app.post("/api/techniques", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/techniques", requireAuth, requireRole(["admin", "teacher"]), requirePermission("techniques"), async (req, res) => {
   const parsed = z
     .object({
       category: z.string().min(2),
@@ -1898,7 +1961,7 @@ app.post("/api/techniques", requireAuth, requireRole(["admin", "teacher"]), asyn
   res.status(201).json(result.rows[0]);
 });
 
-app.patch("/api/techniques/:id/status", requireAuth, requireRole(["admin", "teacher", "student"]), async (req, res) => {
+app.patch("/api/techniques/:id/status", requireAuth, requireRole(["admin", "teacher", "student"]), requirePermission("techniques"), async (req, res) => {
   const parsed = z
     .object({ studentId: z.string().uuid().optional(), status: z.enum(["learned", "developing", "not_learned"]) })
     .safeParse(req.body);
@@ -1918,7 +1981,7 @@ app.patch("/api/techniques/:id/status", requireAuth, requireRole(["admin", "teac
   res.json(result.rows[0]);
 });
 
-app.put("/api/techniques/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.put("/api/techniques/:id", requireAuth, requireRole(["admin", "teacher"]), requirePermission("techniques"), async (req, res) => {
   const parsed = z
     .object({
       category: z.string().min(2),
@@ -1951,12 +2014,12 @@ app.put("/api/techniques/:id", requireAuth, requireRole(["admin", "teacher"]), a
   res.json(result.rows[0]);
 });
 
-app.delete("/api/techniques/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.delete("/api/techniques/:id", requireAuth, requireRole(["admin", "teacher"]), requirePermission("techniques"), async (req, res) => {
   await query("DELETE FROM techniques WHERE id = $1", [req.params.id]);
   res.status(204).end();
 });
 
-app.get("/api/classes", requireAuth, async (_req, res) => {
+app.get("/api/classes", requireAuth, requireAnyPermission(["attendance", "checkins"]), async (_req, res) => {
   const result = await query(
     `SELECT c.id, c.title, c.class_date, c.focus, c.checkin_start_at, c.checkin_end_at,
       t.name AS teacher_name,
@@ -1975,7 +2038,7 @@ app.get("/api/classes", requireAuth, async (_req, res) => {
   res.json(result.rows.map((row) => ({ ...row, attendees: Number(row.attendees) })));
 });
 
-app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (_req, res) => {
+app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), requireAnyPermission(["attendance", "checkins"]), async (_req, res) => {
   return res.status(410).json({ message: "As aulas para check-in sao geradas automaticamente pela grade do plano." });
   /*
 
@@ -2030,7 +2093,7 @@ app.post("/api/classes", requireAuth, requireRole(["admin", "teacher"]), async (
   */
 });
 
-app.get("/api/checkin-requests", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.get("/api/checkin-requests", requireAuth, requireRole(["admin", "teacher"]), requireAnyPermission(["attendance", "checkins"]), async (req, res) => {
   const status = String(req.query.status ?? "pending");
   const statusFilter = status === "all" ? "" : "WHERE tc.status = $1";
   const result = await query(
@@ -2051,7 +2114,7 @@ app.get("/api/checkin-requests", requireAuth, requireRole(["admin", "teacher"]),
   res.json(result.rows);
 });
 
-app.post("/api/attendance", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/attendance", requireAuth, requireRole(["admin", "teacher"]), requireAnyPermission(["attendance", "checkins"]), async (req, res) => {
   const parsed = z.object({ classId: z.string().uuid(), studentId: z.string().uuid() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Dados de presença inválidos." });
 
@@ -2090,7 +2153,7 @@ app.post("/api/attendance", requireAuth, requireRole(["admin", "teacher"]), asyn
   }
 });
 
-app.patch("/api/checkin-requests/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.patch("/api/checkin-requests/:id", requireAuth, requireRole(["admin", "teacher"]), requireAnyPermission(["attendance", "checkins"]), async (req, res) => {
   const parsed = z.object({ status: z.enum(["approved", "rejected"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
 
@@ -2185,7 +2248,7 @@ app.patch("/api/checkin-requests/:id", requireAuth, requireRole(["admin", "teach
   }
 });
 
-app.get("/api/ranking", requireAuth, async (req, res) => {
+app.get("/api/ranking", requireAuth, requirePermission("ranking"), async (req, res) => {
   const scope = String(req.query.scope ?? "monthly");
   const since =
     scope === "weekly"
@@ -2208,7 +2271,7 @@ app.get("/api/ranking", requireAuth, async (req, res) => {
   res.json(result.rows.map((row) => ({ ...row, trainings: Number(row.trainings), position: Number(row.position) })));
 });
 
-app.get("/api/competitions", requireAuth, async (_req, res) => {
+app.get("/api/competitions", requireAuth, requirePermission("competitions"), async (_req, res) => {
   const result = await query(
     `SELECT c.*,
       COUNT(cs.student_id) FILTER (WHERE cs.confirmed = true) AS confirmed_students
@@ -2220,7 +2283,7 @@ app.get("/api/competitions", requireAuth, async (_req, res) => {
   res.json(result.rows.map((row) => ({ ...row, confirmed_students: Number(row.confirmed_students) })));
 });
 
-app.post("/api/competitions", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/competitions", requireAuth, requireRole(["admin", "teacher"]), requirePermission("competitions"), async (req, res) => {
   const parsed = z
     .object({
       name: z.string().min(3),
@@ -2241,7 +2304,7 @@ app.post("/api/competitions", requireAuth, requireRole(["admin", "teacher"]), as
   res.status(201).json(result.rows[0]);
 });
 
-app.put("/api/competitions/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.put("/api/competitions/:id", requireAuth, requireRole(["admin", "teacher"]), requirePermission("competitions"), async (req, res) => {
   const parsed = z
     .object({
       name: z.string().min(3),
@@ -2263,7 +2326,7 @@ app.put("/api/competitions/:id", requireAuth, requireRole(["admin", "teacher"]),
   res.json(result.rows[0]);
 });
 
-app.patch("/api/competitions/:id/status", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.patch("/api/competitions/:id/status", requireAuth, requireRole(["admin", "teacher"]), requirePermission("competitions"), async (req, res) => {
   const parsed = z.object({ status: z.enum(["open", "closed", "completed"]) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
 
@@ -2274,12 +2337,12 @@ app.patch("/api/competitions/:id/status", requireAuth, requireRole(["admin", "te
   res.json(result.rows[0]);
 });
 
-app.delete("/api/competitions/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.delete("/api/competitions/:id", requireAuth, requireRole(["admin", "teacher"]), requirePermission("competitions"), async (req, res) => {
   await query("DELETE FROM competitions WHERE id = $1", [req.params.id]);
   res.status(204).end();
 });
 
-app.post("/api/competitions/:id/confirm", requireAuth, async (req, res) => {
+app.post("/api/competitions/:id/confirm", requireAuth, requirePermission("competitions"), async (req, res) => {
   const studentId = await resolveStudentId(req.user?.id, req.body.studentId, req.user?.role, ["admin", "teacher"]);
   if (!studentId) return res.status(404).json({ message: "Aluno não encontrado." });
 
@@ -2294,12 +2357,12 @@ app.post("/api/competitions/:id/confirm", requireAuth, async (req, res) => {
   res.json(result.rows[0]);
 });
 
-app.get("/api/products", requireAuth, async (_req, res) => {
+app.get("/api/products", requireAuth, requirePermission("store"), async (_req, res) => {
   const result = await query("SELECT * FROM products WHERE archived_at IS NULL ORDER BY available DESC, category, name");
   res.json(result.rows);
 });
 
-app.post("/api/products/image", requireAuth, requireRole(["admin", "teacher"]), uploadLimiter, async (req, res) => {
+app.post("/api/products/image", requireAuth, requireRole(["admin", "teacher"]), requirePermission("store"), uploadLimiter, async (req, res) => {
   const parsed = z
     .object({
       fileName: z.string().min(1).max(180),
@@ -2338,7 +2401,7 @@ app.post("/api/products/image", requireAuth, requireRole(["admin", "teacher"]), 
   res.status(201).json({ imageUrl, originalName: parsed.data.fileName });
 });
 
-app.get("/api/products/image/:id/file", async (req, res) => {
+app.get("/api/products/image/:id/file", requireAuth, requirePermission("store"), async (req, res) => {
   const result = await query<{
     original_name: string;
     mime_type: string;
@@ -2351,11 +2414,11 @@ app.get("/api/products/image/:id/file", async (req, res) => {
   res.setHeader("Content-Type", image.mime_type);
   res.setHeader("Content-Length", String(Number(image.size_bytes)));
   res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(image.original_name)}"`);
-  res.setHeader("Cache-Control", "public, max-age=86400");
+  res.setHeader("Cache-Control", "private, max-age=300");
   res.end(image.content);
 });
 
-app.post("/api/products", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/products", requireAuth, requireRole(["admin", "teacher"]), requirePermission("store"), async (req, res) => {
   const parsed = z
     .object({
       name: z.string().min(2),
@@ -2387,7 +2450,7 @@ app.post("/api/products", requireAuth, requireRole(["admin", "teacher"]), async 
   res.status(201).json(result.rows[0]);
 });
 
-app.put("/api/products/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.put("/api/products/:id", requireAuth, requireRole(["admin", "teacher"]), requirePermission("store"), async (req, res) => {
   const parsed = z
     .object({
       name: z.string().min(2),
@@ -2420,7 +2483,7 @@ app.put("/api/products/:id", requireAuth, requireRole(["admin", "teacher"]), asy
   res.json(result.rows[0]);
 });
 
-app.patch("/api/products/:id/availability", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.patch("/api/products/:id/availability", requireAuth, requireRole(["admin", "teacher"]), requirePermission("store"), async (req, res) => {
   const parsed = z.object({ available: z.boolean(), stock: z.coerce.number().int().min(0).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ message: "Status inválido." });
 
@@ -2434,7 +2497,7 @@ app.patch("/api/products/:id/availability", requireAuth, requireRole(["admin", "
   res.json(result.rows[0]);
 });
 
-app.post("/api/products/:id/sell", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.post("/api/products/:id/sell", requireAuth, requireRole(["admin", "teacher"]), requirePermission("store"), async (req, res) => {
   const parsed = z
     .object({
       quantity: z.coerce.number().int().min(1),
@@ -2501,7 +2564,7 @@ app.post("/api/products/:id/sell", requireAuth, requireRole(["admin", "teacher"]
   }
 });
 
-app.delete("/api/products/:id", requireAuth, requireRole(["admin", "teacher"]), async (req, res) => {
+app.delete("/api/products/:id", requireAuth, requireRole(["admin", "teacher"]), requirePermission("store"), async (req, res) => {
   const orders = await query<{ total: string }>("SELECT COUNT(*) AS total FROM orders WHERE product_id = $1", [req.params.id]);
   if (Number(orders.rows[0]?.total ?? 0) > 0) {
     const archived = await query(
@@ -2517,7 +2580,7 @@ app.delete("/api/products/:id", requireAuth, requireRole(["admin", "teacher"]), 
   res.status(204).end();
 });
 
-app.get("/api/posts", requireAuth, async (_req, res) => {
+app.get("/api/posts", requireAuth, requirePermission("dashboard"), async (_req, res) => {
   const result = await query(
     `SELECT p.*, u.name AS author_name, COUNT(DISTINCT l.user_id) AS likes, COUNT(DISTINCT c.id) AS comments
      FROM posts p
@@ -2736,7 +2799,7 @@ async function syncMembershipPayment(client: Pick<typeof pool, "query">, student
 
 type StudentFallbackRole = "admin" | "teacher" | "finance";
 
-function canUseStudentFallback(role?: string, allowedRoles: StudentFallbackRole[] = ["admin", "teacher", "finance"]) {
+function canUseStudentFallback(role?: string, allowedRoles: StudentFallbackRole[] = ["admin", "teacher"]) {
   return allowedRoles.includes(role as StudentFallbackRole);
 }
 
