@@ -2826,7 +2826,7 @@ function TechniqueMetric({ label, value }: { label: string; value: number }) {
 function RankingPanel({ token, currentStudentId }: { token: string; currentStudentId?: string }) {
   const [scope, setScope] = useState("monthly");
   const { data, loading, error } = useApi<RankingItem[]>(`/ranking?scope=${scope}`, token);
-  const ranking = data ?? [];
+  const ranking = useMemo(() => normalizeRanking(data ?? []), [data]);
   const podium = ranking.slice(0, 3);
   const champion = ranking[0];
   const currentStudent = currentStudentId ? ranking.find((item) => item.id === currentStudentId) : null;
@@ -3074,6 +3074,12 @@ function rankingScore(item: RankingItem) {
 
 function trainingLabel(value: number) {
   return `${value} ${value === 1 ? "treino" : "treinos"}`;
+}
+
+function normalizeRanking(items: RankingItem[]) {
+  return [...items]
+    .sort((a, b) => b.trainings - a.trainings || b.xp - a.xp || a.full_name.localeCompare(b.full_name, "pt-BR"))
+    .map((item, index) => ({ ...item, position: index + 1 }));
 }
 
 function rankingScopeLabel(scope: string) {

@@ -1050,9 +1050,11 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
     ),
     query<{ position: string }>(
       `SELECT position FROM (
-         SELECT student_id, ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC, student_id ASC) AS position
-         FROM attendance
-         GROUP BY student_id
+         SELECT s.id AS student_id, ROW_NUMBER() OVER (ORDER BY COUNT(a.id) DESC, s.xp DESC, s.full_name ASC) AS position
+         FROM students s
+         LEFT JOIN attendance a ON a.student_id = s.id
+         WHERE s.status = 'active'
+         GROUP BY s.id
        ) ranked
       WHERE student_id = $1`,
       [student.id]
