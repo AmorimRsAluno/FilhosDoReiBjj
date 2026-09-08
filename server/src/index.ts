@@ -1050,7 +1050,7 @@ app.get("/api/student/dashboard", requireAuth, async (req, res) => {
     ),
     query<{ position: string }>(
       `SELECT position FROM (
-         SELECT student_id, RANK() OVER (ORDER BY COUNT(*) DESC) AS position
+         SELECT student_id, ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC, student_id ASC) AS position
          FROM attendance
          GROUP BY student_id
        ) ranked
@@ -2259,7 +2259,7 @@ app.get("/api/ranking", requireAuth, requirePermission("ranking"), async (req, r
 
   const result = await query(
     `SELECT s.id, s.full_name, s.photo_url, s.belt, s.xp, s.level, COUNT(a.id) AS trainings,
-      RANK() OVER (ORDER BY COUNT(a.id) DESC, s.xp DESC) AS position
+      ROW_NUMBER() OVER (ORDER BY COUNT(a.id) DESC, s.xp DESC, s.full_name ASC) AS position
      FROM students s
      LEFT JOIN attendance a ON a.student_id = s.id AND a.check_in_at >= ${since}
      WHERE s.status = 'active'

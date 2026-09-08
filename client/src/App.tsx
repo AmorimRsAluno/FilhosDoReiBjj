@@ -2827,41 +2827,40 @@ function RankingPanel({ token, currentStudentId }: { token: string; currentStude
   const [scope, setScope] = useState("monthly");
   const { data, loading, error } = useApi<RankingItem[]>(`/ranking?scope=${scope}`, token);
   const ranking = data ?? [];
-  const topThree = ranking.slice(0, 3);
-  const otherStudents = ranking.slice(3);
+  const podium = ranking.slice(0, 3);
   const champion = ranking[0];
   const currentStudent = currentStudentId ? ranking.find((item) => item.id === currentStudentId) : null;
-  const maxTrainings = Math.max(...ranking.map((item) => item.trainings), 1);
-  const maxXp = Math.max(...ranking.map((item) => item.xp), 1);
+  const maxScore = Math.max(...ranking.map(rankingScore), 1);
   const totalTrainings = ranking.reduce((sum, item) => sum + item.trainings, 0);
+  const totalXp = ranking.reduce((sum, item) => sum + item.xp, 0);
 
   return (
     <div className="space-y-5">
       <PageTitle title="Ranking" subtitle="Disputa saudável, frequência no tatame e evolução dos alunos" />
-      <Card className="overflow-hidden">
-        <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
-          <div>
+      <Card className="overflow-hidden border-royal-gold/25 bg-[linear-gradient(145deg,rgba(34,28,8,.92),rgba(8,8,8,.98))]">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-center">
+          <div className="min-w-0">
             <p className="section-kicker">Corrida do tatame</p>
             <h3 className="mt-1 text-2xl font-black text-white">
               {champion ? `${champion.full_name} lidera o desafio` : "Ranking aguardando treinos"}
             </h3>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-royal-muted">
-              Acompanhe quem mais treinou no período. O ranking combina presença e XP para manter a disputa divertida.
+              Acompanhe constância, treinos e XP em uma classificação limpa para os alunos acompanharem a própria evolução.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[460px]">
+          <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[500px]">
             <RankingMetric label="Atletas" value={ranking.length} />
             <RankingMetric label="Treinos" value={totalTrainings} />
-            <RankingMetric label="Líder" value={champion ? `#${champion.position}` : "-"} />
+            <RankingMetric label="XP total" value={totalXp} />
           </div>
         </div>
-        <div className="mt-5 flex flex-wrap gap-2">
+        <div className="mt-5 inline-flex flex-wrap gap-2 rounded-lg border border-white/10 bg-black/30 p-1">
           {[
             ["weekly", "Semanal"],
             ["monthly", "Mensal"],
             ["general", "Geral"]
           ].map(([key, label]) => (
-            <Button key={key} variant={scope === key ? "primary" : "ghost"} onClick={() => setScope(key)}>
+            <Button key={key} variant={scope === key ? "primary" : "ghost"} className="min-w-24" onClick={() => setScope(key)}>
               {label}
             </Button>
           ))}
@@ -2873,81 +2872,58 @@ function RankingPanel({ token, currentStudentId }: { token: string; currentStude
         <>
           {currentStudent && (
             <Card className="border-royal-gold/40 bg-royal-gold/10">
-              <div className="grid gap-3 md:grid-cols-[auto_1fr_auto] md:items-center">
+              <div className="grid gap-4 md:grid-cols-[auto_minmax(0,1fr)_auto] md:items-center">
                 <Avatar src={currentStudent.photo_url} name={currentStudent.full_name} />
-                <div>
+                <div className="min-w-0">
                   <p className="section-kicker">Sua posição</p>
-                  <h3 className="text-lg font-black text-white">#{currentStudent.position} - {currentStudent.full_name}</h3>
+                  <h3 className="truncate text-lg font-black text-white">#{currentStudent.position} - {currentStudent.full_name}</h3>
                   <p className="mt-1 text-sm text-zinc-300">{currentStudent.trainings} treinos · nível {currentStudent.level} · {currentStudent.xp} XP</p>
+                  <div className="mt-3 max-w-xl">
+                    <RankingProgress label="Força no ranking" value={rankingScore(currentStudent)} max={maxScore} suffix="pontos" />
+                  </div>
                 </div>
                 <Badge tone="gold">{rankingMotivation(currentStudent.position)}</Badge>
               </div>
             </Card>
           )}
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            {topThree.map((item, index) => (
-              <Card key={item.id} className={`relative overflow-hidden ${index === 0 ? "border-royal-gold/60 bg-royal-gold/10 lg:-translate-y-2" : ""}`}>
-                <div className="absolute right-4 top-4 text-5xl font-black text-white/5">#{item.position}</div>
-                <div className="relative flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`grid h-12 w-12 place-items-center rounded-full border ${podiumTone(index)}`}>
-                      {index === 0 ? <Trophy size={22} /> : index === 1 ? <Medal size={22} /> : <Award size={22} />}
-                    </div>
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-royal-gold">{podiumLabel(index)}</p>
-                      <h3 className="mt-1 font-black text-white">{item.full_name}</h3>
-                    </div>
-                  </div>
-                  <Avatar src={item.photo_url} name={item.full_name} />
-                </div>
-                <div className="relative mt-5 grid gap-3">
-                  <RankingProgress label="Treinos" value={item.trainings} max={maxTrainings} suffix="treinos" />
-                  <RankingProgress label="XP" value={item.xp} max={maxXp} suffix="XP" />
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <Badge tone="gold">Nível {item.level}</Badge>
-                  <Badge>{item.belt}</Badge>
-                </div>
-              </Card>
-            ))}
-          </div>
-
           <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-            <Card>
+            <div className="space-y-4">
+              <Card>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="section-kicker">Pódio</p>
+                    <h3 className="text-lg font-black text-white">Destaques do período</h3>
+                  </div>
+                  <Badge>{rankingScopeLabel(scope)}</Badge>
+                </div>
+                {podium.length === 0 ? (
+                  <EmptyState>Nenhum treino registrado para este período.</EmptyState>
+                ) : (
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    {podium.map((item, index) => (
+                      <RankingPodiumCard key={item.id} item={item} index={index} maxScore={maxScore} />
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              <Card>
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="section-kicker">Tabela geral</p>
-                  <h3 className="text-lg font-black text-white">Atletas em movimento</h3>
+                  <p className="section-kicker">Classificação completa</p>
+                  <h3 className="text-lg font-black text-white">Todos os atletas organizados</h3>
                 </div>
-                <Badge>{rankingScopeLabel(scope)}</Badge>
+                <span className="text-sm font-semibold text-royal-muted">{ranking.length} atleta(s)</span>
               </div>
               <div className="grid gap-3">
                 {ranking.length === 0 && <EmptyState>Nenhum treino registrado para este período.</EmptyState>}
-                {otherStudents.map((item) => {
-                  const isCurrent = item.id === currentStudentId;
-                  return (
-                    <div key={item.id} className={`rounded-lg border p-3 ${isCurrent ? "border-royal-gold bg-royal-gold/10" : "border-royal-line bg-black/20"}`}>
-                      <div className="grid gap-3 md:grid-cols-[auto_auto_1fr_auto] md:items-center">
-                        <span className="text-xl font-black text-royal-gold">#{item.position}</span>
-                        <Avatar src={item.photo_url} name={item.full_name} />
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h4 className="font-bold text-white">{item.full_name}</h4>
-                            {isCurrent && <Badge tone="gold">Você</Badge>}
-                          </div>
-                          <p className="text-sm text-royal-muted">{item.belt} · nível {item.level} · {item.xp} XP</p>
-                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                            <div className="h-full rounded-full bg-royal-gold" style={{ width: `${Math.max(8, (item.trainings / maxTrainings) * 100)}%` }} />
-                          </div>
-                        </div>
-                        <Badge tone="gold">{item.trainings} treinos</Badge>
-                      </div>
-                    </div>
-                  );
-                })}
+                {ranking.map((item, index) => (
+                  <RankingRow key={item.id} item={item} index={index} currentStudentId={currentStudentId} maxScore={maxScore} />
+                ))}
               </div>
-            </Card>
+              </Card>
+            </div>
 
             <Card className="xl:sticky xl:top-4 xl:self-start">
               <p className="section-kicker">Desafio</p>
@@ -2962,10 +2938,10 @@ function RankingPanel({ token, currentStudentId }: { token: string; currentStude
                 </p>
               </div>
               <div className="mt-4 grid gap-2">
-                {topThree.map((item) => (
+                {podium.map((item) => (
                   <div key={item.id} className="flex items-center justify-between rounded-lg border border-royal-line bg-black/25 px-3 py-2 text-sm">
-                    <span className="font-semibold text-white">#{item.position} {item.full_name}</span>
-                    <span className="text-royal-gold">{item.trainings} treinos</span>
+                    <span className="min-w-0 truncate font-semibold text-white">#{item.position} {item.full_name}</span>
+                    <span className="shrink-0 text-royal-gold">{trainingLabel(item.trainings)}</span>
                   </div>
                 ))}
               </div>
@@ -2979,7 +2955,7 @@ function RankingPanel({ token, currentStudentId }: { token: string; currentStude
 
 function RankingMetric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border border-royal-line bg-black/25 px-3 py-2">
+    <div className="rounded-lg border border-royal-line bg-black/30 px-3 py-2">
       <span className="block text-xs font-semibold text-royal-muted">{label}</span>
       <strong className="mt-1 block text-xl text-white">{value}</strong>
     </div>
@@ -2987,7 +2963,7 @@ function RankingMetric({ label, value }: { label: string; value: string | number
 }
 
 function RankingProgress({ label, value, max, suffix }: { label: string; value: number; max: number; suffix: string }) {
-  const percent = Math.max(8, Math.min(100, (value / Math.max(max, 1)) * 100));
+  const percent = value <= 0 ? 0 : Math.max(8, Math.min(100, (value / Math.max(max, 1)) * 100));
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold text-royal-muted">
@@ -2995,7 +2971,75 @@ function RankingProgress({ label, value, max, suffix }: { label: string; value: 
         <span>{value} {suffix}</span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-white/10">
-        <div className="h-full rounded-full bg-royal-gold" style={{ width: `${percent}%` }} />
+        <div className="h-full rounded-full bg-gradient-to-r from-royal-gold to-yellow-200 transition-all duration-500" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function RankingPodiumCard({ item, index, maxScore }: { item: RankingItem; index: number; maxScore: number }) {
+  return (
+    <div className={`group relative overflow-hidden rounded-lg border p-4 transition duration-200 hover:-translate-y-1 hover:border-royal-gold/70 ${podiumCardTone(index)}`}>
+      <div className="absolute right-3 top-2 text-6xl font-black text-white/5">#{item.position}</div>
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-full border ${podiumTone(index)}`}>
+            {index === 0 ? <Trophy size={22} /> : index === 1 ? <Medal size={22} /> : <Award size={22} />}
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-royal-gold">{podiumLabel(index)}</p>
+            <h3 className="mt-1 truncate font-black text-white">{item.full_name}</h3>
+          </div>
+        </div>
+        <Avatar src={item.photo_url} name={item.full_name} />
+      </div>
+      <div className="relative mt-5 grid gap-3">
+        <RankingProgress label="Força" value={rankingScore(item)} max={maxScore} suffix="pts" />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Badge tone="gold">{trainingLabel(item.trainings)}</Badge>
+        <Badge>Nível {item.level}</Badge>
+        <Badge>{item.belt}</Badge>
+      </div>
+    </div>
+  );
+}
+
+function RankingRow({
+  item,
+  index,
+  currentStudentId,
+  maxScore
+}: {
+  item: RankingItem;
+  index: number;
+  currentStudentId?: string;
+  maxScore: number;
+}) {
+  const isCurrent = item.id === currentStudentId;
+  return (
+    <div
+      className={`group rounded-lg border p-3 transition duration-200 hover:-translate-y-0.5 hover:border-royal-gold/60 hover:bg-royal-gold/[.06] ${
+        isCurrent ? "border-royal-gold bg-royal-gold/10" : "border-royal-line bg-black/25"
+      }`}
+    >
+      <div className="grid gap-3 sm:grid-cols-[3.25rem_3rem_minmax(0,1fr)_auto] sm:items-center">
+        <div className={`grid h-12 w-12 place-items-center rounded-lg border text-lg font-black ${rankingPositionTone(index)}`}>#{item.position}</div>
+        <Avatar src={item.photo_url} name={item.full_name} />
+        <div className="min-w-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h4 className="max-w-full truncate font-bold text-white">{item.full_name}</h4>
+            {isCurrent && <Badge tone="gold">Você</Badge>}
+          </div>
+          <p className="mt-1 text-sm text-royal-muted">{item.belt} · nível {item.level} · {item.xp} XP</p>
+          <div className="mt-2">
+            <RankingProgress label="Pontuação" value={rankingScore(item)} max={maxScore} suffix="pts" />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 sm:justify-end">
+          <Badge tone="gold">{trainingLabel(item.trainings)}</Badge>
+          <Badge>{item.xp} XP</Badge>
+        </div>
       </div>
     </div>
   );
@@ -3005,10 +3049,31 @@ function podiumLabel(index: number) {
   return ["Campeão do período", "Vice-líder", "Terceiro lugar"][index] ?? "Destaque";
 }
 
+function podiumCardTone(index: number) {
+  if (index === 0) return "border-royal-gold/60 bg-royal-gold/10 shadow-[0_16px_40px_rgba(255,196,15,.10)]";
+  if (index === 1) return "border-zinc-300/25 bg-white/[.04]";
+  return "border-orange-300/25 bg-orange-300/[.06]";
+}
+
 function podiumTone(index: number) {
   if (index === 0) return "border-royal-gold/70 bg-royal-gold text-black";
   if (index === 1) return "border-zinc-300/50 bg-zinc-200 text-zinc-900";
   return "border-orange-300/50 bg-orange-300 text-zinc-950";
+}
+
+function rankingPositionTone(index: number) {
+  if (index === 0) return "border-royal-gold/70 bg-royal-gold text-black";
+  if (index === 1) return "border-zinc-300/50 bg-zinc-200 text-zinc-900";
+  if (index === 2) return "border-orange-300/50 bg-orange-300 text-zinc-950";
+  return "border-royal-line bg-white/[.04] text-royal-gold";
+}
+
+function rankingScore(item: RankingItem) {
+  return item.trainings * 100 + item.xp;
+}
+
+function trainingLabel(value: number) {
+  return `${value} ${value === 1 ? "treino" : "treinos"}`;
 }
 
 function rankingScopeLabel(scope: string) {
